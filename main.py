@@ -2,8 +2,7 @@ import json
 import asyncio
 import re
 import requests
-from typing import List, Dict, Optional
-from urllib.parse import quote
+from typing import List, Dict
 
 # AstrBot 核心 API 导入
 from astrbot.api import logger, AstrBotConfig
@@ -18,14 +17,12 @@ class TouchGalPlugin(Star):
         self.config = config
         self.session_timeout = self.config.get("session_timeout", 60)
         self.domain = self.config.get("touchgal_domain", "www.touchgal.top")
-        self.shionlib_enabled = self.config.get("shionlib_enabled", True)
-        self.shionlib_domain = "shionlib.com"
         self.active_sessions: Dict[str, SessionController] = {}
         self.api_session = self.create_session()
         
         # 初始化日志
         auto_search = self.config.get("auto_search_enabled", False)
-        logger.info(f"TouchGal 插件已加载 | 自动搜索: {'已启用' if auto_search else '未启用'} | 域名: {self.domain} | Shionlib: {'已启用' if self.shionlib_enabled else '未启用'}")
+        logger.info(f"TouchGal 插件已加载 | 自动搜索: {'已启用' if auto_search else '未启用'} | 域名: {self.domain}")
 
     def create_session(self) -> requests.Session:
         """创建一个包含通用请求头和自定义Cookie的 requests.Session 对象"""
@@ -92,76 +89,6 @@ class TouchGalPlugin(Star):
                 return []
                 
         return await asyncio.to_thread(blocking_get_links)
-
-    async def search_shionlib_async(self, keyword: str, limit: int = 5) -> List[dict]:
-        """
-        从 shionlib.com 搜索游戏，返回游戏列表
-        由于 shionlib 使用 SSR，需要解析 HTML 页面
-        
-        Args:
-            keyword: 搜索关键词
-            limit: 返回结果数量限制
-            
-        Returns:
-            游戏列表，每个元素包含 id, name, url
-        """
-        if not self.shionlib_enabled:
-            return []
-            
-        def blocking_search():
-            search_url = f'https://{self.shionlib_domain}/zh/search/game?q={quote(keyword)}'
-            headers = {
-                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'accept-language': 'zh-CN,zh;q=0.9',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
-            }
-            try:
-                response = requests.get(search_url, headers=headers, timeout=10)
-                response.raise_for_status()
-                html_content = response.text
-                
-                # 解析 HTML 提取游戏信息
-                # 匹配格式: <a href="/zh/game/708">...<h3>游戏名称</h3>...</a>
-                games = []
-                
-                # 使用正则匹配游戏卡片链接和名称
-                # 匹配 href="/zh/game/数字" 的链接
-                link_pattern = r'href="(/zh/game/(\d+))"'
-                links = re.findall(link_pattern, html_content)
-                
-                # 去重并获取游戏ID
-                seen_ids = set()
-                unique_links = []
-                for href, game_id in links:
-                    if game_id not in seen_ids:
-                        seen_ids.add(game_id)
-                        unique_links.append((href, game_id))
-                
-                # 尝试提取游戏名称（从周围的 HTML 内容中）
-                for href, game_id in unique_links[:limit]:
-                    # 尝试找到对应的游戏名称
-                    # 常见模式: <a href="/zh/game/708">...<h3 class="...">游戏名称</h3>...</a>
-                    name_pattern = rf'href="{re.escape(href)}"[^>]*>[\s\S]*?<(?:h[1-6]|p|span)[^>]*>([^<]+)<'
-                    name_match = re.search(name_pattern, html_content)
-                    
-                    game_name = name_match.group(1).strip() if name_match else f"游戏 {game_id}"
-                    
-                    games.append({
-                        'id': game_id,
-                        'name': game_name,
-                        'url': f'https://{self.shionlib_domain}{href}'
-                    })
-                
-                return games
-                
-            except requests.RequestException as e:
-                logger.error(f"Shionlib search failed: {e}")
-                return []
-            except Exception as e:
-                logger.error(f"Shionlib parse error: {e}")
-                return []
-        
-        return await asyncio.to_thread(blocking_search)
 
     @filter.command("搜索")
     async def search_command(self, event: AstrMessageEvent, keyword: str):
@@ -256,17 +183,9 @@ class TouchGalPlugin(Star):
                         if not resources:
                             await event.send(event.plain_result("未能获取到该游戏的资源链接。"))
                         else:
-                            # 同时搜索 Shionlib
-                            shionlib_games = await self.search_shionlib_async(session_state["keyword"], limit=5)
-                            
                             # 使用合并转发消息发送资源
-                            bot_uin = event.get_self_id()
-                            nodes = self._build_forward_nodes(
-                                selected_game.get('name', '未知游戏'), 
-                                resources, 
-                                bot_uin,
-                                shionlib_games=shionlib_games
-                            )
+                            bot_uin = event.get_self_id()  # 使用机器人自己的头像
+                            nodes = self._build_forward_nodes(selected_game.get('name', '未知游戏'), resources, bot_uin)
                             await event.send(event.chain_result(nodes))
                         
                         controller.stop()
@@ -305,7 +224,7 @@ class TouchGalPlugin(Star):
                 del self.active_sessions[session_id]
             event.stop_event()
 
-    def _build_forward_nodes(self, game_name: str, resources: List[dict], bot_uin: str = "10000", shionlib_games: Optional[List[dict]] = None):
+    def _build_forward_nodes(self, game_name: str, resources: List[dict], bot_uin: str = "10000"):
         """
         将资源列表构建成一个合并转发消息。
         使用 Nodes 组件包装多个 Node，确保作为一条合并转发消息发送。
@@ -314,33 +233,19 @@ class TouchGalPlugin(Star):
             game_name: 游戏名称
             resources: 资源列表
             bot_uin: 机器人的 QQ 号，用于显示头像
-            shionlib_games: Shionlib 搜索结果列表（可选）
         """
         from astrbot.api.message_components import Node, Nodes, Plain
         
         node_list = []
         
-        # 第一个节点：Shionlib 搜索结果（如果有）
-        if shionlib_games:
-            shionlib_content = [Plain(f"📚 书音图书馆 - 相关游戏\n")]
-            shionlib_content.append(Plain("━" * 10 + "\n\n"))
-            for game in shionlib_games:
-                shionlib_content.append(Plain(f"🎮 {game['name']}\n"))
-                shionlib_content.append(Plain(f"🔗 {game['url']}\n\n"))
-            
-            node_list.append(Node(
-                uin=bot_uin,
-                content=shionlib_content
-            ))
-        
-        # 第二个节点：TouchGal 标题信息
+        # 第一个节点：标题信息
         title_content = [
             Plain(f"🎮 游戏名称: {game_name}\n"),
             Plain(f"📦 共找到 {len(resources)} 个资源\n"),
             Plain("━" * 10)
         ]
         node_list.append(Node(
-            uin=bot_uin,
+            uin=bot_uin,  # 使用机器人的头像
             content=title_content
         ))
         
@@ -363,7 +268,7 @@ class TouchGalPlugin(Star):
                 content_parts.append(Plain(f"\n💬 备注: {note}"))
             
             node_list.append(Node(
-                uin=bot_uin,
+                uin=bot_uin,  # 使用机器人的头像
                 content=content_parts
             ))
         
@@ -467,12 +372,9 @@ class TouchGalPlugin(Star):
                 event.stop_event()
             return
         
-        # 同时搜索 Shionlib
-        shionlib_games = await self.search_shionlib_async(keyword, limit=5)
-        
         # 构建并发送合并转发消息
-        bot_uin = event.get_self_id()
-        nodes = self._build_forward_nodes(game_name, resources, bot_uin, shionlib_games=shionlib_games)
+        bot_uin = event.get_self_id()  # 使用机器人自己的头像
+        nodes = self._build_forward_nodes(game_name, resources, bot_uin)
         
         yield event.chain_result(nodes)
         event.stop_event()
