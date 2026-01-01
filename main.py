@@ -342,36 +342,36 @@ class TouchGalPlugin(Star):
         
         node_list = []
         
-        # Shionlib 资源推荐（每个游戏单独一个节点）
+        # ========== Shionlib 资源推荐 ==========
         if shionlib_games:
+            # 先发送 Shionlib 站点信息
+            shionlib_header = [
+                Plain("📚 书音的图书馆\n"),
+                Plain("━━━━━━━━━━\n\n"),
+                Plain(f"📍 {self.shionlib_domain}\n")
+            ]
+            node_list.append(Node(uin=bot_uin, content=shionlib_header))
+            
+            # 每个游戏详情单独一个节点
             for idx, game in enumerate(shionlib_games, 1):
-                shionlib_content = [
-                    Plain("┏━━━━━━━━━━━━━┓\n"),
-                    Plain("┃  📚 书音的图书馆  ┃\n"),
-                    Plain("┗━━━━━━━━━━━━━┛\n\n"),
+                game_content = [
+                    Plain(f"━━ 推荐 {idx} ━━\n\n"),
                     Plain(f"🎮 {game['name']}\n\n"),
-                    Plain("🔗 点击访问 ↓\n"),
-                    Plain(f"{game['url']}\n\n"),
-                    Plain(f"📍 {self.shionlib_domain}")
+                    Plain("� 点击访问 ↓\n"),
+                    Plain(f"{game['url']}")
                 ]
-                node_list.append(Node(
-                    uin=bot_uin,
-                    content=shionlib_content
-                ))
+                node_list.append(Node(uin=bot_uin, content=game_content))
         
-        # TouchGal 标题信息
-        title_content = [
-            Plain("┏━━━━━━━━━━━━━┓\n"),
-            Plain("┃ 📦 TouchGal 资源站 ┃\n"),
-            Plain("┗━━━━━━━━━━━━━┛\n\n"),
+        # ========== TouchGal 资源 ==========
+        # TouchGal 站点信息
+        touchgal_header = [
+            Plain("📦 TouchGal 资源站\n"),
+            Plain("━━━━━━━━━━\n\n"),
+            Plain(f"📍 {self.domain}\n"),
             Plain(f"🎮 {game_name}\n"),
-            Plain(f"📦 共 {len(resources)} 个资源\n\n"),
-            Plain(f"📍 {self.domain}")
+            Plain(f"� 找到 {len(resources)} 个资源")
         ]
-        node_list.append(Node(
-            uin=bot_uin,
-            content=title_content
-        ))
+        node_list.append(Node(uin=bot_uin, content=touchgal_header))
         
         # 每个资源单独作为一个节点
         for idx, res in enumerate(resources, 1):
@@ -379,7 +379,7 @@ class TouchGalPlugin(Star):
                 Plain(f"━━ 资源 {idx} ━━\n\n"),
                 Plain(f"📦 {res.get('name', '未知')}\n\n"),
                 Plain("🔗 下载链接 ↓\n"),
-                Plain(f"{res.get('content', '无')}\n")
+                Plain(f"{res.get('content', '无')}")
             ]
             
             password = res.get('password', '')
@@ -387,7 +387,7 @@ class TouchGalPlugin(Star):
             note = res.get('note', '')
             
             if password or code or note:
-                content_parts.append(Plain("\n"))
+                content_parts.append(Plain("\n\n"))
             if password:
                 content_parts.append(Plain(f"🔐 密码: {password}\n"))
             if code:
@@ -395,10 +395,7 @@ class TouchGalPlugin(Star):
             if note:
                 content_parts.append(Plain(f"💬 备注: {note}"))
             
-            node_list.append(Node(
-                uin=bot_uin,
-                content=content_parts
-            ))
+            node_list.append(Node(uin=bot_uin, content=content_parts))
         
         # 使用 Nodes 包装所有节点，确保作为一个合并转发消息发送
         return [Nodes(node_list)]
