@@ -5,12 +5,12 @@
         "hint": "TouchGal 网站的主域名（不含 https:// 前缀）。当网站更换域名时可在此修改。",
         "default": "www.touchgal.top"
     },
-    "touchgal_cookie": {
-        "description": "TouchGal 网站的 Cookie",
-        "type": "string",
-        "hint": "请在此处粘贴您在 touchgal.us 网站登录后的完整 Cookie 字符串。正确配置后，插件将可以搜索 NSFW 内容。请确保您的Cookie中包含 'kun-patch-setting-store|state|data|kunNsfwEnable=all'。",
+    "show_nsfw": {
+        "description": "显示 NSFW 内容",
+        "type": "bool",
+        "hint": "开启后，搜索结果将包含 NSFW（成人向）内容。",
         "obvious_hint": true,
-        "default": ""
+        "default": false
     },
     "session_timeout": {
         "description": "搜索会话的超时时间（秒）",
@@ -36,11 +36,5 @@
         "type": "string",
         "hint": "用于匹配群聊消息并提取搜索关键词的正则表达式。第一个捕获组将作为搜索关键词。",
         "default": "(?:大佬|老哥|老师|朋友)?\\s*(?:请问|问一下)?\\s*(?:有没有|求(?:一个|一下|一份|个)?|谁有|哪里有|有人有)\\s*[《【\\\"']?([^的》】\\\"']+?)[》】\\\"']?(?:的)?(?:资源|游戏|下载|链接)?(?:吗|呀|啊|呢|么|？|\\?|$)"
-    },
-    "forward_message_sender_name": {
-        "description": "合并转发消息的发送者名称",
-        "type": "string",
-        "hint": "在合并转发消息中显示的发送者昵称。",
-        "default": "TouchGal 资源助手"
     }
 }

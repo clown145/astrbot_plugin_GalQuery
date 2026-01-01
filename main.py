@@ -33,12 +33,10 @@ class TouchGalPlugin(Star):
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
         }
         
-        cookie = self.config.get("touchgal_cookie")
-        if cookie:
-            logger.info("TouchGal 插件已加载 Cookie，将以登录状态进行搜索。")
-            headers['cookie'] = cookie
-        else:
-            logger.warning("TouchGal 插件未配置 Cookie，可能无法搜索 NSFW 内容。")
+        # 如果开启 NSFW 内容显示，添加对应的 cookie
+        if self.config.get("show_nsfw", False):
+            headers['cookie'] = 'kun-patch-setting-store|state|data|kunNsfwEnable=all'
+            logger.info("TouchGal 插件已开启 NSFW 内容显示。")
             
         session.headers.update(headers)
         return session
@@ -131,7 +129,7 @@ class TouchGalPlugin(Star):
                         for idx, game in enumerate(new_games):
                             response_text += f"  {idx + 1}. {game.get('name')}\n"
                         # ======================= [修改] 更新提示文本 =======================
-                        response_text += "----------------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
+                        response_text += "-------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
                         await event.send(event.plain_result(response_text))
                     
                     controller.keep(timeout=self.session_timeout, reset_timeout=True)
@@ -161,13 +159,11 @@ class TouchGalPlugin(Star):
                     response_text = "--- 请选择 ---\n"
                     for idx, game in enumerate(new_games):
                         response_text += f"  {idx + 1}. {game.get('name')}\n"
-                    # ======================= [修改] 更新提示文本 =======================
-                    response_text += "----------------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
+                    response_text += "-------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
                     await event.send(event.plain_result(response_text))
                 
                 controller.keep(timeout=self.session_timeout, reset_timeout=True)
 
-            # ======================= [新增] 退出指令逻辑 =======================
             elif user_input_lower == 'e':
                 await event.send(event.plain_result("已退出搜索会话。现在您可以正常与我对话了。"))
                 controller.stop()  # 停止会话
@@ -185,9 +181,8 @@ class TouchGalPlugin(Star):
                             await event.send(event.plain_result("未能获取到该游戏的资源链接。"))
                         else:
                             # 使用合并转发消息发送资源
-                            sender_name = self.config.get("forward_message_sender_name", "TouchGal 资源助手")
                             bot_uin = event.get_self_id()  # 使用机器人自己的头像
-                            nodes = self._build_forward_nodes(selected_game.get('name', '未知游戏'), resources, sender_name, bot_uin)
+                            nodes = self._build_forward_nodes(selected_game.get('name', '未知游戏'), resources, bot_uin)
                             await event.send(event.chain_result(nodes))
                         
                         controller.stop()
@@ -211,8 +206,7 @@ class TouchGalPlugin(Star):
             response_text = "--- 请选择 ---\n"
             for idx, game in enumerate(initial_games):
                 response_text += f"  {idx + 1}. {game.get('name')}\n"
-            # ======================= [修改] 更新提示文本 =======================
-            response_text += "----------------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
+            response_text += "-------\n请输入序号选择，'p' 下一页，'q' 上一页，'e' 退出搜索。\n提示：在退出前，您无法与机器人进行普通对话。"
             yield event.plain_result(response_text)
             
             await search_session_waiter(event)
@@ -227,7 +221,7 @@ class TouchGalPlugin(Star):
                 del self.active_sessions[session_id]
             event.stop_event()
 
-    def _build_forward_nodes(self, game_name: str, resources: List[dict], sender_name: str, bot_uin: str = "10000"):
+    def _build_forward_nodes(self, game_name: str, resources: List[dict], bot_uin: str = "10000"):
         """
         将资源列表构建成一个合并转发消息。
         使用 Nodes 组件包装多个 Node，确保作为一条合并转发消息发送。
@@ -235,7 +229,6 @@ class TouchGalPlugin(Star):
         Args:
             game_name: 游戏名称
             resources: 资源列表
-            sender_name: 显示的发送者昵称
             bot_uin: 机器人的 QQ 号，用于显示头像
         """
         from astrbot.api.message_components import Node, Nodes, Plain
@@ -250,7 +243,6 @@ class TouchGalPlugin(Star):
         ]
         node_list.append(Node(
             uin=bot_uin,  # 使用机器人的头像
-            name=sender_name,
             content=title_content
         ))
         
@@ -274,7 +266,6 @@ class TouchGalPlugin(Star):
             
             node_list.append(Node(
                 uin=bot_uin,  # 使用机器人的头像
-                name=sender_name,
                 content=content_parts
             ))
         
@@ -361,9 +352,8 @@ class TouchGalPlugin(Star):
             return
         
         # 构建并发送合并转发消息
-        sender_name = self.config.get("forward_message_sender_name", "TouchGal 资源助手")
         bot_uin = event.get_self_id()  # 使用机器人自己的头像
-        nodes = self._build_forward_nodes(game_name, resources, sender_name, bot_uin)
+        nodes = self._build_forward_nodes(game_name, resources, bot_uin)
         
         yield event.chain_result(nodes)
         event.stop_event()

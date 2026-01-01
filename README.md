@@ -7,15 +7,13 @@
 - 🔍 **指令搜索**：通过 `/搜索 <游戏名>` 命令搜索资源
 - 🤖 **自动搜索**：检测群聊中的资源请求，自动搜索并返回结果
 - 📦 **合并转发**：资源以合并转发消息形式发送，每个资源独立展示
-- 🔐 **NSFW 支持**：配置 Cookie 后可搜索 NSFW 内容
+- 🔐 **NSFW 支持**：一键开关即可搜索 NSFW 内容
 
 ## 📦 安装
 
-在 AstrBot 插件市场搜索安装，或手动克隆到 `data/plugins/` 目录：
-
 ```bash
 cd AstrBot/data/plugins
-git clone https://github.com/your-repo/astrbot_plugin_touchgal
+git clone https://github.com/clown145/astrbot_plugin_touchgal
 ```
 
 ## ⚙️ 配置说明
@@ -23,12 +21,11 @@ git clone https://github.com/your-repo/astrbot_plugin_touchgal
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `touchgal_domain` | string | `www.touchgal.top` | TouchGal 网站域名（域名变更时修改） |
-| `touchgal_cookie` | string | 空 | 登录后的 Cookie，配置后可搜索 NSFW |
+| `show_nsfw` | bool | false | 开启后可搜索 NSFW 内容 |
 | `session_timeout` | int | 60 | 搜索会话超时时间（秒） |
 | `auto_search_enabled` | bool | false | 启用自动搜索功能 |
 | `auto_search_silent` | bool | true | 静默模式（搜不到不回复） |
 | `auto_search_pattern` | string | 正则表达式 | 自动搜索的匹配模式 |
-| `forward_message_sender_name` | string | `TouchGal 资源助手` | 转发消息的发送者名称 |
 
 ## 🎮 使用方法
 
