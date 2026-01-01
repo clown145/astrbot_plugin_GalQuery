@@ -326,7 +326,8 @@ class TouchGalPlugin(Star):
         game_name: str, 
         resources: List[dict], 
         bot_uin: str = "10000",
-        shionlib_games: Optional[List[dict]] = None
+        shionlib_games: Optional[List[dict]] = None,
+        touchgal_suggestions: Optional[List[dict]] = None
     ):
         """
         将资源列表构建成一个合并转发消息。
@@ -337,6 +338,7 @@ class TouchGalPlugin(Star):
             resources: 资源列表
             bot_uin: 机器人的 QQ 号，用于显示头像
             shionlib_games: Shionlib 搜索结果列表（可选）
+            touchgal_suggestions: TouchGal 推荐游戏列表（可选，自动搜索时使用）
         """
         from astrbot.api.message_components import Node, Nodes, Plain
         
@@ -361,6 +363,29 @@ class TouchGalPlugin(Star):
                     Plain(f"{game['url']}")
                 ]
                 node_list.append(Node(uin=bot_uin, content=game_content))
+        
+        # ========== TouchGal 推荐游戏（自动搜索时显示） ==========
+        if touchgal_suggestions and len(touchgal_suggestions) > 1:
+            # TouchGal 推荐站点信息
+            suggest_header = [
+                Plain("📦 TouchGal 相关推荐\n"),
+                Plain("━━━━━━━━━━\n\n"),
+                Plain(f"📍 {self.domain}\n"),
+                Plain(f"🔍 找到 {len(touchgal_suggestions)} 个相关游戏")
+            ]
+            node_list.append(Node(uin=bot_uin, content=suggest_header))
+            
+            # 每个推荐游戏单独一个节点
+            for idx, game in enumerate(touchgal_suggestions, 1):
+                unique_id = game.get('uniqueId', '')
+                game_url = f"https://{self.domain}/{unique_id}" if unique_id else ""
+                suggest_content = [
+                    Plain(f"━━ 推荐 {idx} ━━\n\n"),
+                    Plain(f"🎮 {game.get('name', '未知')}\n\n"),
+                    Plain("▶ 点击访问\n"),
+                    Plain(f"{game_url}")
+                ]
+                node_list.append(Node(uin=bot_uin, content=suggest_content))
         
         # ========== TouchGal 资源 ==========
         # TouchGal 站点信息
@@ -469,8 +494,11 @@ class TouchGalPlugin(Star):
         if not silent_mode:
             yield event.plain_result(f"🔍 检测到资源请求，正在搜索「{keyword}」...")
         
-        # 执行搜索
-        games = await self.search_games_async(keyword, page=1, limit=1)
+        # 获取推荐数量配置
+        suggest_limit = self.config.get("auto_search_suggest_limit", 5)
+        
+        # 执行搜索（获取多个结果用于推荐）
+        games = await self.search_games_async(keyword, page=1, limit=suggest_limit)
         
         if not games:
             # 静默模式：搜不到就不回复
@@ -479,7 +507,7 @@ class TouchGalPlugin(Star):
                 event.stop_event()
             return
         
-        # 获取第一个结果
+        # 获取第一个结果的资源
         first_game = games[0]
         game_name = first_game.get('name', '未知游戏')
         
@@ -487,7 +515,7 @@ class TouchGalPlugin(Star):
         if not silent_mode:
             yield event.plain_result(f"✅ 找到游戏「{game_name}」，正在获取资源链接...")
         
-        # 获取资源链接
+        # 获取资源链接（只获取第一个游戏的资源）
         resources = await self.get_links_async(first_game)
         
         if not resources:
@@ -504,7 +532,9 @@ class TouchGalPlugin(Star):
         
         # 构建并发送合并转发消息
         bot_uin = event.get_self_id()  # 使用机器人自己的头像
-        nodes = self._build_forward_nodes(game_name, resources, bot_uin, shionlib_games)
+        # 传递所有搜索到的游戏作为推荐（如果有多个）
+        touchgal_suggestions = games if len(games) > 1 else None
+        nodes = self._build_forward_nodes(game_name, resources, bot_uin, shionlib_games, touchgal_suggestions)
         
         yield event.chain_result(nodes)
         event.stop_event()

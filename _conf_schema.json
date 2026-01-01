@@ -43,6 +43,12 @@
         "obvious_hint": true,
         "default": false
     },
+    "auto_search_suggest_limit": {
+        "description": "自动搜索推荐数量",
+        "type": "int",
+        "hint": "自动搜索时，在资源链接前显示的 TouchGal 相关游戏页面链接数量。",
+        "default": 5
+    },
     "auto_search_silent": {
         "description": "静默模式",
         "type": "bool",

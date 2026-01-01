@@ -28,6 +28,7 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 | `show_nsfw` | bool | false | 开启后可搜索 NSFW 内容 |
 | `session_timeout` | int | 60 | 搜索会话超时时间（秒） |
 | `auto_search_enabled` | bool | false | 启用自动搜索功能 |
+| `auto_search_suggest_limit` | int | 5 | 自动搜索时显示的相关游戏推荐数量 |
 | `auto_search_silent` | bool | true | 静默模式（搜不到不回复） |
 | `auto_search_pattern` | string | 正则表达式 | 自动搜索的匹配模式 |
 
