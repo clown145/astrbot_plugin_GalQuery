@@ -12,6 +12,13 @@
         "obvious_hint": true,
         "default": false
     },
+    "shionlib_enabled": {
+        "description": "启用书音图书馆搜索",
+        "type": "bool",
+        "hint": "开启后，在返回资源时会同时搜索 shionlib.com（书音图书馆）并显示前5个相关游戏的详情页链接。",
+        "obvious_hint": true,
+        "default": true
+    },
     "session_timeout": {
         "description": "搜索会话的超时时间（秒）",
         "type": "int",
