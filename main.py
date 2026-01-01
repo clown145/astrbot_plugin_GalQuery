@@ -19,6 +19,10 @@ class TouchGalPlugin(Star):
         self.domain = self.config.get("touchgal_domain", "www.touchgal.top")
         self.active_sessions: Dict[str, SessionController] = {}
         self.api_session = self.create_session()
+        
+        # 初始化日志
+        auto_search = self.config.get("auto_search_enabled", False)
+        logger.info(f"TouchGal 插件已加载 | 自动搜索: {'已启用' if auto_search else '未启用'} | 域名: {self.domain}")
 
     def create_session(self) -> requests.Session:
         """创建一个包含通用请求头和自定义Cookie的 requests.Session 对象"""
@@ -278,18 +282,27 @@ class TouchGalPlugin(Star):
         自动搜索并以合并转发消息形式返回第一个结果的资源。
         """
         # 检查是否启用自动搜索
-        if not self.config.get("auto_search_enabled", False):
+        auto_search_enabled = self.config.get("auto_search_enabled", False)
+        if not auto_search_enabled:
+            logger.debug("TouchGal 自动搜索未启用，跳过处理")
             return
         
         message = event.message_str.strip()
         if not message:
             return
         
+        logger.debug(f"TouchGal 自动搜索已启用，收到群消息: {message[:50]}...")
+        
         # 获取配置
         silent_mode = self.config.get("auto_search_silent", True)
         
         # 获取正则匹配模式（从配置读取）
         pattern = self.config.get("auto_search_pattern", "")
+        
+        # 空模式检查
+        if not pattern:
+            logger.warning("TouchGal 自动搜索正则模式为空，跳过处理")
+            return
         
         try:
             match = re.search(pattern, message)
@@ -298,7 +311,10 @@ class TouchGalPlugin(Star):
             return
         
         if not match:
+            logger.debug(f"TouchGal 消息未匹配正则模式")
             return
+        
+        logger.debug(f"TouchGal 正则匹配成功，捕获内容: {match.group(1) if match.lastindex else '无捕获组'}")
         
         # 提取并清理搜索关键词
         keyword = match.group(1).strip()
