@@ -280,10 +280,16 @@ class TouchGalPlugin(Star):
                             if self.shionlib_enabled:
                                 shionlib_games = await self.search_shionlib_async(selected_game.get('name', ''), limit=self.shionlib_limit)
                             
-                            # 使用合并转发消息发送资源
-                            bot_uin = event.get_self_id()  # 使用机器人自己的头像
-                            nodes = self._build_forward_nodes(selected_game.get('name', '未知游戏'), resources, bot_uin, shionlib_games)
-                            await event.send(event.chain_result(nodes))
+                            # 智能选择发送方式
+                            if self._is_forward_supported(event):
+                                # QQ 平台：使用合并转发消息
+                                bot_uin = event.get_self_id()
+                                nodes = self._build_forward_nodes(selected_game.get('name', '未知游戏'), resources, bot_uin, shionlib_games)
+                                await event.send(event.chain_result(nodes))
+                            else:
+                                # 其他平台：发送单条消息
+                                message_text = self._build_single_message(selected_game.get('name', '未知游戏'), resources, shionlib_games)
+                                await event.send(event.plain_result(message_text))
                         
                         controller.stop()
                     else:
@@ -425,6 +431,96 @@ class TouchGalPlugin(Star):
         # 使用 Nodes 包装所有节点，确保作为一个合并转发消息发送
         return [Nodes(node_list)]
 
+    def _build_single_message(
+        self, 
+        game_name: str, 
+        resources: List[dict], 
+        shionlib_games: Optional[List[dict]] = None,
+        touchgal_suggestions: Optional[List[dict]] = None
+    ) -> str:
+        """
+        构建单条消息文本（用于不支持合并转发的平台）
+        
+        Args:
+            game_name: 游戏名称
+            resources: 资源列表
+            shionlib_games: Shionlib 搜索结果列表（可选）
+            touchgal_suggestions: TouchGal 推荐游戏列表（可选）
+        
+        Returns:
+            格式化的消息文本
+        """
+        lines = []
+        
+        # ========== Shionlib 推荐 ==========
+        if shionlib_games:
+            lines.append(f"📚 书音的图书馆 ({self.shionlib_domain})")
+            lines.append("━━━━━━━━━━")
+            for game in shionlib_games:
+                lines.append(f"🎮 {game['name']}")
+                lines.append(f"▶ {game['url']}")
+            lines.append("")
+        
+        # ========== TouchGal 推荐 ==========
+        if touchgal_suggestions and len(touchgal_suggestions) > 1:
+            lines.append(f"📦 TouchGal 相关推荐 ({self.domain})")
+            lines.append("━━━━━━━━━━")
+            for game in touchgal_suggestions:
+                unique_id = game.get('uniqueId', '')
+                game_url = f"https://{self.domain}/{unique_id}" if unique_id else ""
+                lines.append(f"🎮 {game.get('name', '未知')}")
+                lines.append(f"▶ {game_url}")
+            lines.append("")
+        
+        # ========== TouchGal 资源 ==========
+        lines.append(f"📦 TouchGal 资源站 ({self.domain})")
+        lines.append("━━━━━━━━━━")
+        lines.append(f"🎮 {game_name} | 📦 共 {len(resources)} 个资源")
+        lines.append("")
+        
+        for idx, res in enumerate(resources, 1):
+            lines.append(f"━━ 资源 {idx} ━━")
+            lines.append(f"📦 {res.get('name', '未知')}")
+            lines.append(f"▶ {res.get('content', '无')}")
+            
+            extras = []
+            if res.get('password'):
+                extras.append(f"🔐 密码: {res['password']}")
+            if res.get('code'):
+                extras.append(f"📝 提取码: {res['code']}")
+            if res.get('note'):
+                extras.append(f"💬 备注: {res['note']}")
+            if extras:
+                lines.append(" | ".join(extras))
+            lines.append("")
+        
+        return "\n".join(lines).strip()
+
+    def _is_forward_supported(self, event: AstrMessageEvent) -> bool:
+        """
+        检测当前平台是否支持合并转发消息
+        
+        Returns:
+            True 如果支持合并转发（aiocqhttp），否则 False
+        """
+        try:
+            # 检查消息来源平台
+            platform = getattr(event, 'platform_name', None)
+            if platform and 'aiocqhttp' in platform.lower():
+                return True
+            
+            # 备用检测：检查 message_obj 的类型
+            msg_obj = getattr(event, 'message_obj', None)
+            if msg_obj:
+                raw = getattr(msg_obj, 'raw_message', None)
+                # aiocqhttp 的原始消息通常是 dict 或特定格式
+                if isinstance(raw, dict) and ('message_type' in raw or 'post_type' in raw):
+                    return True
+            
+            return False
+        except Exception:
+            return False
+
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def auto_search_handler(self, event: AstrMessageEvent):
         """
@@ -530,11 +626,18 @@ class TouchGalPlugin(Star):
         if self.shionlib_enabled:
             shionlib_games = await self.search_shionlib_async(game_name, limit=self.shionlib_limit)
         
-        # 构建并发送合并转发消息
-        bot_uin = event.get_self_id()  # 使用机器人自己的头像
         # 传递所有搜索到的游戏作为推荐（如果有多个）
         touchgal_suggestions = games if len(games) > 1 else None
-        nodes = self._build_forward_nodes(game_name, resources, bot_uin, shionlib_games, touchgal_suggestions)
         
-        yield event.chain_result(nodes)
+        # 智能选择发送方式：检测平台是否支持合并转发
+        if self._is_forward_supported(event):
+            # QQ 平台：使用合并转发消息
+            bot_uin = event.get_self_id()
+            nodes = self._build_forward_nodes(game_name, resources, bot_uin, shionlib_games, touchgal_suggestions)
+            yield event.chain_result(nodes)
+        else:
+            # 其他平台：发送单条消息
+            message_text = self._build_single_message(game_name, resources, shionlib_games, touchgal_suggestions)
+            yield event.plain_result(message_text)
+        
         event.stop_event()
