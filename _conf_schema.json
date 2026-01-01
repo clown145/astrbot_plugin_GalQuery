@@ -14,8 +14,14 @@
     "shionlib_enabled": {
         "description": "启用 Shionlib 推荐",
         "type": "bool",
-        "hint": "开启后，搜索结果会在合并消息开头显示 Shionlib 上的相关游戏链接（前5个）。",
+        "hint": "开启后，搜索结果会在合并消息开头显示 Shionlib 上的相关游戏链接。",
         "default": true
+    },
+    "shionlib_limit": {
+        "description": "Shionlib 推荐数量",
+        "type": "int",
+        "hint": "返回的 Shionlib 相关游戏链接数量（每个链接单独一条消息）。",
+        "default": 1
     },
     "show_nsfw": {
         "description": "显示 NSFW 内容",

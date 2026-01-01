@@ -19,6 +19,7 @@ class TouchGalPlugin(Star):
         self.domain = self.config.get("touchgal_domain", "www.touchgal.top")
         self.shionlib_domain = self.config.get("shionlib_domain", "shionlib.com")
         self.shionlib_enabled = self.config.get("shionlib_enabled", True)
+        self.shionlib_limit = self.config.get("shionlib_limit", 1)
         self.active_sessions: Dict[str, SessionController] = {}
         
         # 初始化通用请求头
@@ -277,7 +278,7 @@ class TouchGalPlugin(Star):
                             # 并行搜索 Shionlib
                             shionlib_games = []
                             if self.shionlib_enabled:
-                                shionlib_games = await self.search_shionlib_async(selected_game.get('name', ''))
+                                shionlib_games = await self.search_shionlib_async(selected_game.get('name', ''), limit=self.shionlib_limit)
                             
                             # 使用合并转发消息发送资源
                             bot_uin = event.get_self_id()  # 使用机器人自己的头像
@@ -341,54 +342,61 @@ class TouchGalPlugin(Star):
         
         node_list = []
         
-        # 第一个节点：Shionlib 资源推荐（如果有）
+        # Shionlib 资源推荐（每个游戏单独一个节点）
         if shionlib_games:
-            shionlib_content = [
-                Plain(f"📚 【书音的图书馆】相关推荐\n"),
-                Plain(f"━" * 10 + "\n\n")
-            ]
-            for game in shionlib_games:
-                shionlib_content.append(Plain(f"🎮 {game['name']}\n"))
-                shionlib_content.append(Plain(f"🔗 {game['url']}\n\n"))
-            
-            node_list.append(Node(
-                uin=bot_uin,
-                content=shionlib_content
-            ))
+            for idx, game in enumerate(shionlib_games, 1):
+                shionlib_content = [
+                    Plain("┏━━━━━━━━━━━━━┓\n"),
+                    Plain("┃  📚 书音的图书馆  ┃\n"),
+                    Plain("┗━━━━━━━━━━━━━┛\n\n"),
+                    Plain(f"🎮 {game['name']}\n\n"),
+                    Plain("🔗 点击访问 ↓\n"),
+                    Plain(f"{game['url']}\n\n"),
+                    Plain(f"📍 {self.shionlib_domain}")
+                ]
+                node_list.append(Node(
+                    uin=bot_uin,
+                    content=shionlib_content
+                ))
         
-        # 第二个节点：TouchGal 标题信息
+        # TouchGal 标题信息
         title_content = [
-            Plain(f"📦 【TouchGal 资源站】\n"),
-            Plain(f"━" * 10 + "\n\n"),
-            Plain(f"🎮 游戏名称: {game_name}\n"),
-            Plain(f"📦 共找到 {len(resources)} 个资源\n"),
-            Plain("━" * 10)
+            Plain("┏━━━━━━━━━━━━━┓\n"),
+            Plain("┃ 📦 TouchGal 资源站 ┃\n"),
+            Plain("┗━━━━━━━━━━━━━┛\n\n"),
+            Plain(f"🎮 {game_name}\n"),
+            Plain(f"📦 共 {len(resources)} 个资源\n\n"),
+            Plain(f"📍 {self.domain}")
         ]
         node_list.append(Node(
-            uin=bot_uin,  # 使用机器人的头像
+            uin=bot_uin,
             content=title_content
         ))
         
         # 每个资源单独作为一个节点
         for idx, res in enumerate(resources, 1):
             content_parts = [
-                Plain(f"📦 资源 {idx}: {res.get('name', '未知')}\n\n"),
-                Plain(f"🔗 链接:\n{res.get('content', '无')}\n")
+                Plain(f"━━ 资源 {idx} ━━\n\n"),
+                Plain(f"📦 {res.get('name', '未知')}\n\n"),
+                Plain("🔗 下载链接 ↓\n"),
+                Plain(f"{res.get('content', '无')}\n")
             ]
             
             password = res.get('password', '')
             code = res.get('code', '')
             note = res.get('note', '')
             
+            if password or code or note:
+                content_parts.append(Plain("\n"))
             if password:
-                content_parts.append(Plain(f"\n🔐 解压密码: {password}"))
+                content_parts.append(Plain(f"🔐 密码: {password}\n"))
             if code:
-                content_parts.append(Plain(f"\n📝 提取码: {code}"))
+                content_parts.append(Plain(f"📝 提取码: {code}\n"))
             if note:
-                content_parts.append(Plain(f"\n💬 备注: {note}"))
+                content_parts.append(Plain(f"💬 备注: {note}"))
             
             node_list.append(Node(
-                uin=bot_uin,  # 使用机器人的头像
+                uin=bot_uin,
                 content=content_parts
             ))
         
@@ -495,7 +503,7 @@ class TouchGalPlugin(Star):
         # 并行搜索 Shionlib
         shionlib_games = []
         if self.shionlib_enabled:
-            shionlib_games = await self.search_shionlib_async(game_name)
+            shionlib_games = await self.search_shionlib_async(game_name, limit=self.shionlib_limit)
         
         # 构建并发送合并转发消息
         bot_uin = event.get_self_id()  # 使用机器人自己的头像
