@@ -406,9 +406,9 @@ class TouchGalPlugin(Star):
                 Plain(f"🎮 {game['name']}\n\n"),
                 Plain(f"▶ {game['url']}\n\n")
             ]
-            # 直接使用原始图片 URL（不下载）
-            if game.get('image'):
-                game_content.append(Image.fromURL(game['image']))
+            # 暂时禁用图片，测试是否图片导致发送失败
+            # if game.get('image'):
+            #     game_content.append(Image.fromURL(game['image']))
             
             node_list.append(Node(uin=bot_uin, content=game_content))
         
