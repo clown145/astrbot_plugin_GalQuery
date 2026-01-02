@@ -593,43 +593,46 @@ class TouchGalPlugin(Star):
         # 获取推荐数量配置
         suggest_limit = self.config.get("auto_search_suggest_limit", 5)
         
-        # 执行搜索（获取多个结果用于推荐）
+        # 同时搜索 TouchGal 和 Shionlib（利用书音的模糊搜索）
         games = await self.search_games_async(keyword, page=1, limit=suggest_limit)
         
-        if not games:
-            # 静默模式：搜不到就不回复
+        shionlib_games = []
+        if self.shionlib_enabled:
+            shionlib_games = await self.search_shionlib_async(keyword, limit=self.shionlib_limit)
+        
+        # 如果两边都没搜到，才返回
+        if not games and not shionlib_games:
             if not silent_mode:
                 yield event.plain_result(f"😔 没有找到与「{keyword}」相关的游戏资源。")
                 event.stop_event()
             return
         
-        # 获取第一个结果的资源
-        first_game = games[0]
-        game_name = first_game.get('name', '未知游戏')
+        # 准备数据
+        game_name = None
+        resources = []
+        touchgal_suggestions = None
         
-        # 非静默模式：发送进度提示
-        if not silent_mode:
-            yield event.plain_result(f"✅ 找到游戏「{game_name}」，正在获取资源链接...")
-        
-        # 获取资源链接（只获取第一个游戏的资源）
-        resources = await self.get_links_async(first_game)
-        
-        if not resources:
-            # 静默模式：获取不到资源就不回复
+        # TouchGal 有结果
+        if games:
+            first_game = games[0]
+            game_name = first_game.get('name', '未知游戏')
+            touchgal_suggestions = games if len(games) > 1 else None
+            
+            # 非静默模式：发送进度提示
             if not silent_mode:
-                yield event.plain_result(f"😔 未能获取到「{game_name}」的资源链接。")
+                yield event.plain_result(f"✅ 找到游戏「{game_name}」，正在获取资源链接...")
+            
+            # 获取资源链接
+            resources = await self.get_links_async(first_game)
+        
+        # 如果 TouchGal 没有资源但书音有结果，也发送
+        if not resources and not shionlib_games:
+            if not silent_mode:
+                yield event.plain_result(f"😔 未能获取到资源链接。")
                 event.stop_event()
             return
         
-        # 并行搜索 Shionlib
-        shionlib_games = []
-        if self.shionlib_enabled:
-            shionlib_games = await self.search_shionlib_async(game_name, limit=self.shionlib_limit)
-        
-        # 传递所有搜索到的游戏作为推荐（如果有多个）
-        touchgal_suggestions = games if len(games) > 1 else None
-        
-        # 智能选择发送方式：检测平台是否支持合并转发
+        # 智能选择发送方式
         if self._is_forward_supported(event):
             # QQ 平台：使用合并转发消息
             bot_uin = event.get_self_id()
