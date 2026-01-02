@@ -182,6 +182,219 @@ class TouchGalPlugin(Star):
             logger.error(f"Shionlib 搜索异常: {e}")
             return []
 
+    async def fetch_shionlib_homepage_section(self, section: str) -> List[dict]:
+        """
+        爬取书音首页指定板块的游戏列表
+        
+        Args:
+            section: "本月新作" / "最近更新" / "近期热门"
+        
+        Returns:
+            游戏列表 [{'name': '游戏名', 'url': '链接', 'image': '封面URL'}, ...]
+        """
+        homepage_url = f"https://{self.shionlib_domain}/zh"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9'
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(homepage_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status != 200:
+                        logger.warning(f"Shionlib 首页请求失败，状态码: {response.status}")
+                        return []
+                    
+                    html = await response.text()
+                    
+                    # 在 HTML 中定位指定板块
+                    # 查找板块标题位置，然后提取后续的游戏卡片
+                    section_pos = html.find(f'>{section}<')
+                    if section_pos == -1:
+                        logger.warning(f"Shionlib 未找到板块: {section}")
+                        return []
+                    
+                    # 截取该板块后面的 HTML（到下一个板块或页面结束）
+                    section_html = html[section_pos:]
+                    
+                    # 匹配游戏卡片: <a ... href="/zh/game/xxx" ... class="block group" ...>
+                    # 提取链接、名称和图片
+                    card_pattern = r'<a[^>]*href="(/zh/game/(\d+))"[^>]*class="[^"]*block[^"]*group[^"]*"[^>]*>'
+                    cards = re.finditer(card_pattern, section_html)
+                    
+                    games = []
+                    seen_ids = set()
+                    
+                    for card_match in cards:
+                        href = card_match.group(1)
+                        game_id = card_match.group(2)
+                        
+                        if game_id in seen_ids:
+                            continue
+                        seen_ids.add(game_id)
+                        
+                        # 获取卡片的完整内容（从 <a> 到 </a>）
+                        card_start = card_match.start()
+                        card_end = section_html.find('</a>', card_start)
+                        if card_end == -1:
+                            continue
+                        card_html = section_html[card_start:card_end + 4]
+                        
+                        # 提取游戏名称 (在 <h3> 标签中)
+                        name_match = re.search(r'<h3[^>]*>([^<]+)</h3>', card_html)
+                        game_name = name_match.group(1).strip() if name_match else f"游戏 #{game_id}"
+                        
+                        # 提取封面图片 URL
+                        img_match = re.search(r'<img[^>]*src="([^"]+)"', card_html)
+                        image_url = ""
+                        if img_match:
+                            img_src = img_match.group(1)
+                            # 处理相对路径
+                            if img_src.startswith('/'):
+                                image_url = f"https://{self.shionlib_domain}{img_src}"
+                            else:
+                                image_url = img_src
+                        
+                        games.append({
+                            'name': game_name,
+                            'url': f"https://{self.shionlib_domain}{href}",
+                            'image': image_url
+                        })
+                        
+                        # 限制数量，避免太多
+                        if len(games) >= 10:
+                            break
+                    
+                    logger.info(f"Shionlib 首页 [{section}] 获取到 {len(games)} 个游戏")
+                    return games
+                    
+        except asyncio.TimeoutError:
+            logger.warning(f"Shionlib 首页请求超时")
+            return []
+        except Exception as e:
+            logger.error(f"Shionlib 首页爬取异常: {e}")
+            return []
+
+    def _build_shionlib_showcase_nodes(
+        self, 
+        section_name: str, 
+        games: List[dict], 
+        bot_uin: str = "10000"
+    ):
+        """
+        构建书音展示的合并转发消息（带图片）
+        """
+        from astrbot.api.message_components import Node, Nodes, Plain, Image
+        
+        node_list = []
+        
+        # 标题节点
+        header_content = [
+            Plain(f"📚 书音的图书馆 · {section_name}\n"),
+            Plain("━━━━━━━━━━\n\n"),
+            Plain(f"📍 {self.shionlib_domain}\n"),
+            Plain(f"🔢 共 {len(games)} 个游戏")
+        ]
+        node_list.append(Node(uin=bot_uin, content=header_content))
+        
+        # 每个游戏一个节点
+        for game in games:
+            game_content = [
+                Plain(f"🎮 {game['name']}\n\n"),
+                Plain(f"▶ {game['url']}\n\n")
+            ]
+            # 添加封面图片
+            if game.get('image'):
+                game_content.append(Image.fromURL(game['image']))
+            
+            node_list.append(Node(uin=bot_uin, content=game_content))
+        
+        return [Nodes(node_list)]
+
+    def _build_shionlib_showcase_single(
+        self, 
+        section_name: str, 
+        games: List[dict]
+    ) -> str:
+        """
+        构建书音展示的单条消息（不支持合并转发的平台）
+        """
+        lines = [
+            f"📚 书音的图书馆 · {section_name}",
+            "━━━━━━━━━━",
+            f"📍 {self.shionlib_domain}",
+            f"🔢 共 {len(games)} 个游戏",
+            ""
+        ]
+        
+        for idx, game in enumerate(games, 1):
+            lines.append(f"━━ {idx} ━━")
+            lines.append(f"🎮 {game['name']}")
+            lines.append(f"▶ {game['url']}")
+            if game.get('image'):
+                lines.append(f"🖼️ {game['image']}")
+            lines.append("")
+        
+        return "\n".join(lines).strip()
+
+    @filter.command("本月新作")
+    async def shionlib_new_releases(self, event: AstrMessageEvent):
+        '''获取书音的图书馆本月新作列表'''
+        yield event.plain_result("📚 正在获取书音本月新作...")
+        
+        games = await self.fetch_shionlib_homepage_section("本月新作")
+        
+        if not games:
+            yield event.plain_result("😔 未能获取到本月新作信息。")
+            return
+        
+        if self._is_forward_supported(event):
+            bot_uin = event.get_self_id()
+            nodes = self._build_shionlib_showcase_nodes("本月新作", games, bot_uin)
+            yield event.chain_result(nodes)
+        else:
+            message = self._build_shionlib_showcase_single("本月新作", games)
+            yield event.plain_result(message)
+
+    @filter.command("最近更新")
+    async def shionlib_recent_updates(self, event: AstrMessageEvent):
+        '''获取书音的图书馆最近更新列表'''
+        yield event.plain_result("📚 正在获取书音最近更新...")
+        
+        games = await self.fetch_shionlib_homepage_section("最近更新")
+        
+        if not games:
+            yield event.plain_result("😔 未能获取到最近更新信息。")
+            return
+        
+        if self._is_forward_supported(event):
+            bot_uin = event.get_self_id()
+            nodes = self._build_shionlib_showcase_nodes("最近更新", games, bot_uin)
+            yield event.chain_result(nodes)
+        else:
+            message = self._build_shionlib_showcase_single("最近更新", games)
+            yield event.plain_result(message)
+
+    @filter.command("近期热门")
+    async def shionlib_popular(self, event: AstrMessageEvent):
+        '''获取书音的图书馆近期热门列表'''
+        yield event.plain_result("📚 正在获取书音近期热门...")
+        
+        games = await self.fetch_shionlib_homepage_section("近期热门")
+        
+        if not games:
+            yield event.plain_result("😔 未能获取到近期热门信息。")
+            return
+        
+        if self._is_forward_supported(event):
+            bot_uin = event.get_self_id()
+            nodes = self._build_shionlib_showcase_nodes("近期热门", games, bot_uin)
+            yield event.chain_result(nodes)
+        else:
+            message = self._build_shionlib_showcase_single("近期热门", games)
+            yield event.plain_result(message)
+
     @filter.command("搜索")
     async def search_command(self, event: AstrMessageEvent, keyword: str):
         '''
