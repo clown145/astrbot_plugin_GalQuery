@@ -218,15 +218,20 @@ class TouchGalPlugin(Star):
                     # 截取该板块后面的 HTML（到下一个板块或页面结束）
                     section_html = html[section_pos:]
                     
-                    # 匹配游戏卡片: <a ... href="/zh/game/xxx" ... class="block group" ...>
-                    # 提取链接、名称和图片
-                    card_pattern = r'<a[^>]*href="(/zh/game/(\d+))"[^>]*class="[^"]*block[^"]*group[^"]*"[^>]*>'
-                    cards = re.finditer(card_pattern, section_html)
+                    # 匹配游戏卡片: <a class="block group" href="/zh/game/xxx">
+                    # 注意：class 和 href 的顺序可能不同
+                    # 模式1: class 在前
+                    card_pattern1 = r'<a\s+class="block group"\s+href="(/zh/game/(\d+))"'
+                    # 模式2: href 在前  
+                    card_pattern2 = r'<a\s+href="(/zh/game/(\d+))"\s+class="block group"'
+                    
+                    matches = list(re.finditer(card_pattern1, section_html))
+                    matches.extend(re.finditer(card_pattern2, section_html))
                     
                     games = []
                     seen_ids = set()
                     
-                    for card_match in cards:
+                    for card_match in matches:
                         href = card_match.group(1)
                         game_id = card_match.group(2)
                         
