@@ -2,6 +2,7 @@ import json
 import asyncio
 import re
 import aiohttp
+import base64
 from typing import List, Dict, Optional
 
 # AstrBot 核心 API 导入
@@ -281,6 +282,73 @@ class TouchGalPlugin(Star):
             logger.error(f"Shionlib 首页爬取异常: {e}")
             return []
 
+    async def _download_image_as_base64(self, url: str) -> Optional[str]:
+        """
+        下载图片并转换为 base64 编码
+        
+        Returns:
+            base64 编码的图片字符串，失败返回 None
+        """
+        if not url:
+            return None
+            
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            'Referer': f'https://{self.shionlib_domain}/'
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        return base64.b64encode(image_data).decode('utf-8')
+                    else:
+                        logger.debug(f"图片下载失败: {response.status}")
+                        return None
+        except Exception as e:
+            logger.debug(f"图片下载异常: {e}")
+            return None
+
+    async def _build_shionlib_showcase_nodes_async(
+        self, 
+        section_name: str, 
+        games: List[dict], 
+        bot_uin: str = "10000"
+    ):
+        """
+        构建书音展示的合并转发消息（带图片，异步下载）
+        """
+        from astrbot.api.message_components import Node, Nodes, Plain, Image
+        
+        node_list = []
+        
+        # 标题节点
+        header_content = [
+            Plain(f"📚 书音的图书馆 · {section_name}\n"),
+            Plain("━━━━━━━━━━\n\n"),
+            Plain(f"📍 {self.shionlib_domain}\n"),
+            Plain(f"🔢 共 {len(games)} 个游戏")
+        ]
+        node_list.append(Node(uin=bot_uin, content=header_content))
+        
+        # 每个游戏一个节点
+        for game in games:
+            game_content = [
+                Plain(f"🎮 {game['name']}\n\n"),
+                Plain(f"▶ {game['url']}\n\n")
+            ]
+            # 下载并添加封面图片
+            if game.get('image'):
+                image_base64 = await self._download_image_as_base64(game['image'])
+                if image_base64:
+                    game_content.append(Image.fromBase64(image_base64))
+            
+            node_list.append(Node(uin=bot_uin, content=game_content))
+        
+        return [Nodes(node_list)]
+
     def _build_shionlib_showcase_nodes(
         self, 
         section_name: str, 
@@ -356,7 +424,7 @@ class TouchGalPlugin(Star):
         
         if self._is_forward_supported(event):
             bot_uin = event.get_self_id()
-            nodes = self._build_shionlib_showcase_nodes("本月新作", games, bot_uin)
+            nodes = await self._build_shionlib_showcase_nodes_async("本月新作", games, bot_uin)
             yield event.chain_result(nodes)
         else:
             message = self._build_shionlib_showcase_single("本月新作", games)
@@ -375,7 +443,7 @@ class TouchGalPlugin(Star):
         
         if self._is_forward_supported(event):
             bot_uin = event.get_self_id()
-            nodes = self._build_shionlib_showcase_nodes("最近更新", games, bot_uin)
+            nodes = await self._build_shionlib_showcase_nodes_async("最近更新", games, bot_uin)
             yield event.chain_result(nodes)
         else:
             message = self._build_shionlib_showcase_single("最近更新", games)
@@ -394,7 +462,7 @@ class TouchGalPlugin(Star):
         
         if self._is_forward_supported(event):
             bot_uin = event.get_self_id()
-            nodes = self._build_shionlib_showcase_nodes("近期热门", games, bot_uin)
+            nodes = await self._build_shionlib_showcase_nodes_async("近期热门", games, bot_uin)
             yield event.chain_result(nodes)
         else:
             message = self._build_shionlib_showcase_single("近期热门", games)
