@@ -253,16 +253,37 @@ class TouchGalPlugin(Star):
                         name_match = re.search(r'<h3[^>]*>([^<]+)</h3>', card_html)
                         game_name = name_match.group(1).strip() if name_match else f"游戏 #{game_id}"
                         
-                        # 提取封面图片 URL
-                        img_match = re.search(r'<img[^>]*src="([^"]+)"', card_html)
+                        # 提取封面图片 URL（从 srcset 中获取原始 URL）
+                        # srcset 格式: /_next/image?url=https%3A%2F%2Ft.shionlib.com%2Fgame%2F...
+                        # 需要提取原始 URL: https://t.shionlib.com/game/xxx/cover/xxx.webp
                         image_url = ""
-                        if img_match:
-                            img_src = img_match.group(1)
-                            # 处理相对路径
-                            if img_src.startswith('/'):
-                                image_url = f"https://{self.shionlib_domain}{img_src}"
-                            else:
-                                image_url = img_src
+                        
+                        # 先尝试从 srcset 中提取原始图片 URL
+                        srcset_match = re.search(r'srcset="([^"]+)"', card_html)
+                        if srcset_match:
+                            srcset = srcset_match.group(1)
+                            # 从 srcset 中提取 URL 编码的原始图片地址
+                            # 格式: url=https%3A%2F%2Ft.shionlib.com%2Fgame%2F...
+                            url_match = re.search(r'url=(https?%3A%2F%2F[^&]+)', srcset)
+                            if url_match:
+                                from urllib.parse import unquote
+                                image_url = unquote(url_match.group(1))
+                        
+                        # 如果 srcset 没找到，尝试从 src 提取
+                        if not image_url:
+                            img_match = re.search(r'<img[^>]*src="([^"]+)"', card_html)
+                            if img_match:
+                                img_src = img_match.group(1)
+                                # 检查是否是 Next.js 代理 URL
+                                if '_next/image?url=' in img_src:
+                                    url_match = re.search(r'url=(https?%3A%2F%2F[^&]+)', img_src)
+                                    if url_match:
+                                        from urllib.parse import unquote
+                                        image_url = unquote(url_match.group(1))
+                                elif img_src.startswith('/'):
+                                    image_url = f"https://{self.shionlib_domain}{img_src}"
+                                else:
+                                    image_url = img_src
                         
                         games.append({
                             'name': game_name,
