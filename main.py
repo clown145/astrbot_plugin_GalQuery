@@ -291,8 +291,8 @@ class TouchGalPlugin(Star):
                             'image': image_url
                         })
                         
-                        # 限制数量，避免太多
-                        if len(games) >= 10:
+                        # 限制数量，避免消息太大导致发送失败
+                        if len(games) >= 5:
                             break
                     
                     logger.info(f"Shionlib 首页 [{section}] 获取到 {len(games)} 个游戏")
