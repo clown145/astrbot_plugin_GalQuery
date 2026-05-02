@@ -1,6 +1,7 @@
 import json
 import asyncio
 import re
+import html as html_lib
 import aiohttp
 from typing import List, Dict, Optional
 
@@ -11,7 +12,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.0")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.6")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -45,6 +46,7 @@ class TouchGalPlugin(Star):
             "origin": f"https://{self.domain}",
             "priority": "u=1, i",
             "referer": f"https://{self.domain}/search",
+            "x-requested-with": "kun-fetch",
             "sec-ch-ua": '"Not;A=Brand";v="99", "Google Chrome";v="139", "Chromium";v="139"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
@@ -66,7 +68,7 @@ class TouchGalPlugin(Star):
     ) -> List[dict]:
         """异步执行搜索游戏的网络请求（使用 aiohttp）"""
         search_url = f"https://{self.domain}/api/search"
-        query_list = [{"type": "keyword", "name": keyword}]
+        query_list = [{"type": "keyword", "mode": "include", "name": keyword}]
         query_string = json.dumps(query_list)
         payload = {
             "queryString": query_string,
@@ -84,6 +86,7 @@ class TouchGalPlugin(Star):
             "sortOrder": "desc",
             "selectedYears": ["all"],
             "selectedMonths": ["all"],
+            "minRatingCount": 0,
         }
 
         try:
@@ -115,7 +118,7 @@ class TouchGalPlugin(Star):
     async def get_links_async(self, game_info: dict) -> List[dict]:
         """异步获取下载链接（使用 aiohttp）"""
         patch_id = game_info.get("id")
-        unique_id = game_info.get("uniqueId")
+        unique_id = game_info.get("uniqueId") or game_info.get("unique_id")
         if not patch_id or not unique_id:
             return []
 
@@ -135,13 +138,157 @@ class TouchGalPlugin(Star):
                             f"TouchGal get links failed with status: {response.status}"
                         )
                         return []
-                    return await response.json()
+                    return self._normalize_touchgal_resources(await response.json())
         except asyncio.TimeoutError:
             logger.error("TouchGal get links timeout")
             return []
         except Exception as e:
             logger.error(f"TouchGal get links failed: {e}")
             return []
+
+    def _normalize_touchgal_resources(self, payload: object) -> List[dict]:
+        """兼容 TouchGal 新旧资源接口，统一整理成插件原本使用的结构。"""
+        if not isinstance(payload, list):
+            return []
+
+        resources = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+
+            if "content" in item:
+                resources.append(item)
+                continue
+
+            resource_name = (item.get("name") or "未知").strip()
+            resource_note = (item.get("note") or "").strip()
+            links = item.get("links")
+            if not isinstance(links, list):
+                continue
+
+            for link in links:
+                if not isinstance(link, dict):
+                    continue
+
+                content = (link.get("content") or "").strip()
+                if not content:
+                    continue
+
+                link_name = resource_name
+                size = (link.get("size") or "").strip()
+                if size:
+                    link_name = f"{resource_name} [{size}]"
+
+                resources.append(
+                    {
+                        "name": link_name,
+                        "content": content,
+                        "password": (link.get("password") or "").strip(),
+                        "code": (link.get("code") or "").strip(),
+                        "note": resource_note,
+                    }
+                )
+
+        return resources
+
+    def _decode_json_string(self, value: str) -> str:
+        """解码 Next.js 脚本中的 JSON 字符串片段。"""
+        try:
+            return json.loads(f'"{value}"')
+        except json.JSONDecodeError:
+            return value
+
+    def _strip_html_tags(self, value: str) -> str:
+        """移除标题中的高亮标签并反转义 HTML 实体。"""
+        text = re.sub(r"<[^>]+>", "", value)
+        return html_lib.unescape(text).strip()
+
+    def _extract_shionlib_name_from_chunk(self, chunk: str) -> Optional[str]:
+        """从单个 Next.js 数据块中提取游戏标题。"""
+        alt_matches = re.findall(r'"alt":"((?:\\.|[^"\\])*)"', chunk)
+        for raw_alt in reversed(alt_matches):
+            alt = self._strip_html_tags(self._decode_json_string(raw_alt))
+            if alt:
+                return alt
+
+        html_matches = re.findall(
+            r'"dangerouslySetInnerHTML":\{"__html":"((?:\\.|[^"\\])*)"\}',
+            chunk,
+        )
+        for raw_html in html_matches:
+            title = self._strip_html_tags(self._decode_json_string(raw_html))
+            if title:
+                return title
+
+        return None
+
+    def _parse_shionlib_games(self, html: str, limit: int) -> List[dict]:
+        """解析 Shionlib 当前 Next.js 搜索页中的游戏数据。"""
+        games = []
+        seen_ids = set()
+
+        script_pattern = re.compile(
+            r'<script>self\.__next_f\.push\(\[1,"(.*?)"\]\)</script>',
+            re.S,
+        )
+
+        for raw_chunk in script_pattern.findall(html):
+            if "/zh/game/" not in raw_chunk:
+                continue
+
+            chunk = self._decode_json_string(raw_chunk)
+            href_match = re.search(r'"href":"(/zh/game/(\d+))"', chunk)
+            if not href_match:
+                continue
+
+            href, game_id = href_match.groups()
+            if game_id in seen_ids:
+                continue
+
+            game_name = self._extract_shionlib_name_from_chunk(chunk)
+            if not game_name:
+                game_name = f"游戏 #{game_id}"
+
+            games.append(
+                {
+                    "id": game_id,
+                    "name": game_name,
+                    "url": f"https://{self.shionlib_domain}{href}",
+                }
+            )
+            seen_ids.add(game_id)
+
+            if len(games) >= limit:
+                break
+
+        if games:
+            return games
+
+        fallback_pattern = re.compile(
+            r'<a[^>]*href="(/zh/game/(\d+))"[^>]*>(.*?)</a>',
+            re.S,
+        )
+        for href, game_id, content in fallback_pattern.findall(html):
+            if game_id in seen_ids:
+                continue
+
+            game_name = self._strip_html_tags(content)
+            if not game_name:
+                continue
+
+            games.append(
+                {
+                    "id": game_id,
+                    "name": game_name,
+                    "url": f"https://{self.shionlib_domain}{href}",
+                }
+            )
+            seen_ids.add(game_id)
+
+            if len(games) >= limit:
+                break
+
+        return games
 
     async def search_shionlib_async(self, keyword: str, limit: int = 5) -> List[dict]:
         """
@@ -177,48 +324,11 @@ class TouchGalPlugin(Star):
                         return []
 
                     html = await response.text()
+                    games = self._parse_shionlib_games(html, limit)
 
-                    # 解析 HTML 提取游戏列表
-                    # 匹配格式: <a href="/zh/game/708">...游戏名...</a>
-                    game_pattern = r'<a[^>]*href="(/zh/game/(\d+))"[^>]*>'
-                    matches = re.findall(game_pattern, html)
-
-                    if not matches:
+                    if not games:
                         logger.debug(f"Shionlib 未找到游戏结果: {keyword}")
                         return []
-
-                    # 提取游戏名称（查找游戏卡片中的标题）
-                    # 更精确的匹配：查找包含游戏ID链接附近的标题
-                    games = []
-                    seen_ids = set()
-
-                    for href, game_id in matches:
-                        if game_id in seen_ids:
-                            continue
-                        seen_ids.add(game_id)
-
-                        # 尝试提取游戏名称（查找链接后的文本或附近的 h3/p 标签）
-                        # 简化方案：从 HTML 中匹配游戏名称
-                        name_pattern = (
-                            rf'href="{re.escape(href)}"[^>]*>\s*(?:<[^>]*>)*\s*([^<]+)'
-                        )
-                        name_match = re.search(name_pattern, html)
-                        game_name = (
-                            name_match.group(1).strip()
-                            if name_match
-                            else f"游戏 #{game_id}"
-                        )
-
-                        games.append(
-                            {
-                                "id": game_id,
-                                "name": game_name,
-                                "url": f"https://{self.shionlib_domain}{href}",
-                            }
-                        )
-
-                        if len(games) >= limit:
-                            break
 
                     logger.debug(f"Shionlib 搜索到 {len(games)} 个结果: {keyword}")
                     return games
@@ -486,39 +596,39 @@ class TouchGalPlugin(Star):
                 node_list.append(Node(uin=bot_uin, content=suggest_content))
 
         # ========== TouchGal 资源 ==========
-        # TouchGal 站点信息
-        touchgal_header = [
-            Plain("📦 TouchGal 资源站\n"),
-            Plain("━━━━━━━━━━\n\n"),
-            Plain(f"📍 {self.domain}\n"),
-            Plain(f"🎮 {game_name}\n"),
-            Plain(f"📦 共 {len(resources)} 个资源"),
-        ]
-        node_list.append(Node(uin=bot_uin, content=touchgal_header))
-
-        # 每个资源单独作为一个节点
-        for idx, res in enumerate(resources, 1):
-            content_parts = [
-                Plain(f"━━ 资源 {idx} ━━\n\n"),
-                Plain(f"📦 {res.get('name', '未知')}\n\n"),
-                Plain("▶ 下载链接\n"),
-                Plain(f"{res.get('content', '无')}"),
+        if resources:
+            touchgal_header = [
+                Plain("📦 TouchGal 资源站\n"),
+                Plain("━━━━━━━━━━\n\n"),
+                Plain(f"📍 {self.domain}\n"),
+                Plain(f"🎮 {game_name}\n"),
+                Plain(f"📦 共 {len(resources)} 个资源"),
             ]
+            node_list.append(Node(uin=bot_uin, content=touchgal_header))
 
-            password = res.get("password", "")
-            code = res.get("code", "")
-            note = res.get("note", "")
+            # 每个资源单独作为一个节点
+            for idx, res in enumerate(resources, 1):
+                content_parts = [
+                    Plain(f"━━ 资源 {idx} ━━\n\n"),
+                    Plain(f"📦 {res.get('name', '未知')}\n\n"),
+                    Plain("▶ 下载链接\n"),
+                    Plain(f"{res.get('content', '无')}"),
+                ]
 
-            if password or code or note:
-                content_parts.append(Plain("\n\n"))
-            if password:
-                content_parts.append(Plain(f"🔐 密码: {password}\n"))
-            if code:
-                content_parts.append(Plain(f"📝 提取码: {code}\n"))
-            if note:
-                content_parts.append(Plain(f"💬 备注: {note}"))
+                password = res.get("password", "")
+                code = res.get("code", "")
+                note = res.get("note", "")
 
-            node_list.append(Node(uin=bot_uin, content=content_parts))
+                if password or code or note:
+                    content_parts.append(Plain("\n\n"))
+                if password:
+                    content_parts.append(Plain(f"🔐 密码: {password}\n"))
+                if code:
+                    content_parts.append(Plain(f"📝 提取码: {code}\n"))
+                if note:
+                    content_parts.append(Plain(f"💬 备注: {note}"))
+
+                node_list.append(Node(uin=bot_uin, content=content_parts))
 
         # 使用 Nodes 包装所有节点，确保作为一个合并转发消息发送
         return [Nodes(node_list)]
@@ -565,26 +675,27 @@ class TouchGalPlugin(Star):
             lines.append("")
 
         # ========== TouchGal 资源 ==========
-        lines.append(f"📦 TouchGal 资源站 ({self.domain})")
-        lines.append("━━━━━━━━━━")
-        lines.append(f"🎮 {game_name} | 📦 共 {len(resources)} 个资源")
-        lines.append("")
-
-        for idx, res in enumerate(resources, 1):
-            lines.append(f"━━ 资源 {idx} ━━")
-            lines.append(f"📦 {res.get('name', '未知')}")
-            lines.append(f"▶ {res.get('content', '无')}")
-
-            extras = []
-            if res.get("password"):
-                extras.append(f"🔐 密码: {res['password']}")
-            if res.get("code"):
-                extras.append(f"📝 提取码: {res['code']}")
-            if res.get("note"):
-                extras.append(f"💬 备注: {res['note']}")
-            if extras:
-                lines.append(" | ".join(extras))
+        if resources:
+            lines.append(f"📦 TouchGal 资源站 ({self.domain})")
+            lines.append("━━━━━━━━━━")
+            lines.append(f"🎮 {game_name} | 📦 共 {len(resources)} 个资源")
             lines.append("")
+
+            for idx, res in enumerate(resources, 1):
+                lines.append(f"━━ 资源 {idx} ━━")
+                lines.append(f"📦 {res.get('name', '未知')}")
+                lines.append(f"▶ {res.get('content', '无')}")
+
+                extras = []
+                if res.get("password"):
+                    extras.append(f"🔐 密码: {res['password']}")
+                if res.get("code"):
+                    extras.append(f"📝 提取码: {res['code']}")
+                if res.get("note"):
+                    extras.append(f"💬 备注: {res['note']}")
+                if extras:
+                    lines.append(" | ".join(extras))
+                lines.append("")
 
         return "\n".join(lines).strip()
 
