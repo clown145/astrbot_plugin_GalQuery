@@ -2,6 +2,7 @@ import json
 import asyncio
 import re
 import html as html_lib
+import urllib.parse
 import aiohttp
 from typing import List, Dict, Optional
 
@@ -12,7 +13,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.8")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.9")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -20,6 +21,10 @@ class TouchGalPlugin(Star):
         self.session_timeout = self.config.get("session_timeout", 60)
         self.domain = self.config.get("touchgal_domain", "www.touchgal.top")
         self.shionlib_domain = self.config.get("shionlib_domain", "shionlib.com")
+        self.shionlib_image_domain = self.config.get(
+            "shionlib_image_domain",
+            "t.shionlib.com",
+        )
         self.shionlib_enabled = self.config.get("shionlib_enabled", True)
         self.shionlib_limit = self.config.get("shionlib_limit", 3)
         self.active_sessions: Dict[str, SessionController] = {}
@@ -224,6 +229,22 @@ class TouchGalPlugin(Star):
 
     def _extract_shionlib_cover_from_chunk(self, chunk: str) -> Optional[str]:
         """从单个 Next.js 数据块中提取封面图链接。"""
+        encoded_cover_matches = re.findall(
+            r"https%3A%2F%2F[^\"'&\s]+?%2Fcover%2F[^\"'&\s]+?\.webp",
+            chunk,
+        )
+        for raw_url in encoded_cover_matches:
+            cover_url = urllib.parse.unquote(raw_url).strip()
+            if cover_url:
+                return cover_url
+
+        absolute_cover_matches = re.findall(
+            r"https?://[^\"'&\s]+?/cover/[^\"'&\s]+?\.webp",
+            chunk,
+        )
+        for cover_url in absolute_cover_matches:
+            return cover_url
+
         src_matches = re.findall(r'"src":"((?:\\.|[^"\\])*)"', chunk)
         for raw_src in src_matches:
             src = self._decode_json_string(raw_src).strip()
@@ -232,7 +253,12 @@ class TouchGalPlugin(Star):
 
             if src.startswith("http://") or src.startswith("https://"):
                 return src
-            return f"https://{self.shionlib_domain}/{src.lstrip('/')}"
+            cover_domain = (
+                self.shionlib_image_domain
+                if src.lstrip("/").startswith("game/")
+                else self.shionlib_domain
+            )
+            return f"https://{cover_domain}/{src.lstrip('/')}"
 
         return None
 

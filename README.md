@@ -25,6 +25,7 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 |--------|------|--------|------|
 | `touchgal_domain` | string | `www.touchgal.top` | TouchGal 网站域名 |
 | `shionlib_domain` | string | `shionlib.com` | 书音的图书馆网站域名 |
+| `shionlib_image_domain` | string | `t.shionlib.com` | 书音的图书馆图片域名 |
 | `shionlib_enabled` | bool | true | 启用书音的图书馆推荐 |
 | `shionlib_limit` | int | 3 | 返回的书音推荐数量 |
 | `show_nsfw` | bool | false | 开启后可搜索 NSFW 内容 |
