@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.8
+- fix: 修复 QQ 合并转发中书音封面导致发送失败的问题
+  - 避免在合并转发节点内直接发送 `.webp` 封面图
+  - 改为展示封面链接，防止 aiocqhttp 返回 unsupported file type
+
 ## v1.0.7
 - feat: 优化书音推荐展示
   - 为书音推荐结果增加封面图

@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.7")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.8")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -627,7 +627,7 @@ class TouchGalPlugin(Star):
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选，自动搜索时使用）
         """
-        from astrbot.api.message_components import Node, Nodes, Plain, Image
+        from astrbot.api.message_components import Node, Nodes, Plain
 
         node_list = []
 
@@ -645,8 +645,7 @@ class TouchGalPlugin(Star):
             for idx, game in enumerate(shionlib_games, 1):
                 game_content = [Plain(f"━━ 推荐 {idx} ━━\n\n")]
                 if game.get("cover"):
-                    game_content.append(Image.fromURL(game["cover"]))
-                    game_content.append(Plain("\n"))
+                    game_content.append(Plain(f"🖼 封面链接\n{game['cover']}\n\n"))
                 game_content.extend(
                     [
                         Plain(f"🎮 {game['name']}\n\n"),
