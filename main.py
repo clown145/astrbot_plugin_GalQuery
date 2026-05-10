@@ -2,6 +2,10 @@ import json
 import asyncio
 import re
 import html as html_lib
+import hashlib
+import os
+import shutil
+import tempfile
 import aiohttp
 from typing import List, Dict, Optional
 
@@ -12,7 +16,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.12")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.13")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -368,6 +372,324 @@ class TouchGalPlugin(Star):
         unique_id = game.get("uniqueId") or game.get("unique_id") or ""
         return f"https://{self.domain}/{unique_id}" if unique_id else ""
 
+    def _normalize_touchgal_image_url(self, value: object) -> Optional[str]:
+        """标准化 TouchGal 图片链接。"""
+        if not isinstance(value, str):
+            return None
+
+        image_url = html_lib.unescape(value).strip().strip('"').strip("'")
+        if not image_url:
+            return None
+
+        if image_url.startswith("//"):
+            image_url = f"https:{image_url}"
+        elif image_url.startswith("/"):
+            image_url = f"https://{self.domain}{image_url}"
+
+        if not image_url.startswith(("http://", "https://")):
+            return None
+
+        lowered = image_url.lower().split("?", 1)[0]
+        if lowered.endswith((".mp4", ".webm", ".mkv", ".avi", ".mov")):
+            return None
+
+        return image_url
+
+    def _get_touchgal_image_url(self, game: Optional[dict]) -> Optional[str]:
+        """从 TouchGal 游戏数据中提取封面/横幅图链接。"""
+        if not isinstance(game, dict):
+            return None
+
+        for key in (
+            "banner",
+            "cover",
+            "coverUrl",
+            "cover_url",
+            "image",
+            "imageUrl",
+            "image_url",
+            "thumbnail",
+            "poster",
+        ):
+            image_url = self._normalize_touchgal_image_url(game.get(key))
+            if image_url:
+                return image_url
+
+        for key in ("images", "screenshots", "previews"):
+            values = game.get(key)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if isinstance(item, dict):
+                    for item_key in ("url", "src", "image", "imageUrl"):
+                        image_url = self._normalize_touchgal_image_url(
+                            item.get(item_key)
+                        )
+                        if image_url:
+                            return image_url
+                else:
+                    image_url = self._normalize_touchgal_image_url(item)
+                    if image_url:
+                        return image_url
+
+        return None
+
+    async def _fetch_touchgal_detail_image_async(self, game: dict) -> Optional[str]:
+        """从 TouchGal 详情页兜底提取公开图片链接。"""
+        game_url = self._build_touchgal_game_url(game)
+        if not game_url:
+            return None
+
+        headers = self.headers.copy()
+        headers.update(
+            {
+                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "content-type": "",
+                "referer": f"https://{self.domain}/search",
+            }
+        )
+        headers = {key: value for key, value in headers.items() if value}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    game_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status != 200:
+                        logger.debug(
+                            f"TouchGal detail image fetch failed with status: {response.status}"
+                        )
+                        return None
+                    html = await response.text()
+        except asyncio.TimeoutError:
+            logger.debug("TouchGal detail image fetch timeout")
+            return None
+        except Exception as e:
+            logger.debug(f"TouchGal detail image fetch failed: {e}")
+            return None
+
+        patterns = (
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'"banner":"((?:\\.|[^"\\])*)"',
+            r'<img[^>]+src=["\']([^"\']+)["\']',
+        )
+        for pattern in patterns:
+            for raw_url in re.findall(pattern, html):
+                if "\\/" in raw_url or '\\"' in raw_url:
+                    raw_url = self._decode_json_string(raw_url)
+                image_url = self._normalize_touchgal_image_url(raw_url)
+                if image_url and "touchgaloss.com" in image_url:
+                    game["banner"] = image_url
+                    return image_url
+
+        return None
+
+    async def _ensure_touchgal_image_url_async(
+        self, game: Optional[dict]
+    ) -> Optional[str]:
+        """优先使用搜索接口图片，缺失时从详情页补齐。"""
+        image_url = self._get_touchgal_image_url(game)
+        if image_url or not isinstance(game, dict):
+            return image_url
+        return await self._fetch_touchgal_detail_image_async(game)
+
+    def _get_touchgal_image_cache_dir(self) -> str:
+        """返回 TouchGal 图片缓存目录。"""
+        try:
+            from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+
+            base_dir = get_astrbot_temp_path()
+        except Exception:
+            base_dir = tempfile.gettempdir()
+
+        cache_dir = os.path.join(base_dir, "astrbot_plugin_galquery")
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+
+    def _image_request_headers(self, referer: str = "") -> dict:
+        """构建下载 TouchGal 图片时使用的浏览器请求头。"""
+        headers = {
+            "accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "accept-language": "zh-CN,zh;q=0.9",
+            "user-agent": self.headers.get(
+                "user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            ),
+        }
+        headers["referer"] = referer or f"https://{self.domain}/"
+        return headers
+
+    def _detect_image_kind(
+        self, image_url: str, content_type: str, data: bytes
+    ) -> Optional[str]:
+        """根据内容特征判断图片格式。"""
+        if data.startswith(b"\xff\xd8\xff"):
+            return "jpg"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "png"
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            return "gif"
+        if len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "webp"
+        if len(data) > 12 and data[4:8] == b"ftyp" and b"avif" in data[8:16]:
+            return "avif"
+
+        lowered_type = content_type.lower()
+        for kind in ("jpeg", "jpg", "png", "gif", "webp", "avif"):
+            if kind in lowered_type:
+                return "jpg" if kind == "jpeg" else kind
+
+        lowered_url = image_url.lower().split("?", 1)[0]
+        for kind in ("jpg", "jpeg", "png", "gif", "webp", "avif"):
+            if lowered_url.endswith(f".{kind}"):
+                return "jpg" if kind == "jpeg" else kind
+
+        return None
+
+    def _convert_image_with_pillow_sync(self, source_path: str, output_path: str) -> bool:
+        """用 Pillow 将图片转为 QQ 更稳定的 JPEG。"""
+        try:
+            from PIL import Image as PillowImage
+        except Exception:
+            return False
+
+        try:
+            with PillowImage.open(source_path) as image:
+                image.thumbnail((1280, 1280))
+                if image.mode in ("RGBA", "LA"):
+                    background = PillowImage.new("RGB", image.size, (255, 255, 255))
+                    background.paste(image, mask=image.getchannel("A"))
+                    image = background
+                elif image.mode != "RGB":
+                    image = image.convert("RGB")
+                image.save(output_path, "JPEG", quality=88, optimize=True)
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+        except Exception as e:
+            logger.debug(f"TouchGal image Pillow conversion failed: {e}")
+            return False
+
+    async def _convert_avif_with_decoder(
+        self, source_path: str, output_path: str
+    ) -> bool:
+        """用系统 avifdec 兜底转换 AVIF。"""
+        decoder = shutil.which("avifdec")
+        if not decoder:
+            return False
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                decoder,
+                source_path,
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                await asyncio.wait_for(process.communicate(), timeout=20)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                return False
+
+            return (
+                process.returncode == 0
+                and os.path.exists(output_path)
+                and os.path.getsize(output_path) > 0
+            )
+        except Exception as e:
+            logger.debug(f"TouchGal image avifdec conversion failed: {e}")
+            return False
+
+    async def _prepare_touchgal_image_file(
+        self, image_url: str, referer: str = ""
+    ) -> Optional[str]:
+        """下载并在必要时转换 TouchGal 图片，返回可发送的本地文件。"""
+        if not image_url:
+            return None
+
+        cache_dir = self._get_touchgal_image_cache_dir()
+        cache_key = hashlib.sha256(image_url.encode("utf-8")).hexdigest()[:24]
+        cached_jpg = os.path.join(cache_dir, f"touchgal_{cache_key}.jpg")
+        cached_png = os.path.join(cache_dir, f"touchgal_{cache_key}.png")
+
+        for cached_path in (cached_jpg, cached_png):
+            if os.path.exists(cached_path) and os.path.getsize(cached_path) > 0:
+                return cached_path
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    image_url,
+                    headers=self._image_request_headers(referer),
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as response:
+                    data = await response.read()
+                    if response.status != 200 or not data:
+                        logger.debug(
+                            f"TouchGal image download failed with status: {response.status}"
+                        )
+                        return None
+                    content_type = response.headers.get("content-type", "")
+        except asyncio.TimeoutError:
+            logger.debug("TouchGal image download timeout")
+            return None
+        except Exception as e:
+            logger.debug(f"TouchGal image download failed: {e}")
+            return None
+
+        if data.lstrip().lower().startswith((b"<!doctype html", b"<html")):
+            logger.debug("TouchGal image download returned HTML instead of image")
+            return None
+
+        image_kind = self._detect_image_kind(image_url, content_type, data)
+        if image_kind in ("jpg", "png", "gif"):
+            output_path = os.path.join(cache_dir, f"touchgal_{cache_key}.{image_kind}")
+            with open(output_path, "wb") as file:
+                file.write(data)
+            return output_path
+
+        raw_ext = image_kind or "img"
+        raw_path = os.path.join(cache_dir, f"touchgal_{cache_key}.{raw_ext}")
+        with open(raw_path, "wb") as file:
+            file.write(data)
+
+        if await asyncio.to_thread(
+            self._convert_image_with_pillow_sync, raw_path, cached_jpg
+        ):
+            return cached_jpg
+
+        if image_kind == "avif" and await self._convert_avif_with_decoder(
+            raw_path, cached_png
+        ):
+            return cached_png
+
+        logger.debug(f"TouchGal image cannot be converted: {image_url}")
+        return None
+
+    async def _append_touchgal_image_component(
+        self,
+        content: list,
+        game: Optional[dict],
+        Image,
+        Plain,
+    ) -> None:
+        """向合并转发节点追加 TouchGal 图片，失败时追加图片链接。"""
+        image_url = await self._ensure_touchgal_image_url_async(game)
+        if not image_url:
+            return
+
+        referer = self._build_touchgal_game_url(game) if isinstance(game, dict) else ""
+        image_path = await self._prepare_touchgal_image_file(image_url, referer)
+        if image_path:
+            content.append(Image.fromFileSystem(image_path))
+            content.append(Plain("\n"))
+            return
+
+        content.append(Plain(f"🖼 {image_url}\n\n"))
+
     async def _search_resources_for_agent(self, keyword: str) -> str:
         """执行一次非交互式搜索，供 Agent 工具调用。"""
         keyword = str(keyword or "").strip()
@@ -397,6 +719,7 @@ class TouchGalPlugin(Star):
             resources,
             shionlib_games,
             touchgal_suggestions,
+            selected_game,
         )
 
         if selected_game and not resources:
@@ -556,11 +879,12 @@ class TouchGalPlugin(Star):
                             if self._is_forward_supported(event):
                                 # QQ 平台：使用合并转发消息
                                 bot_uin = event.get_self_id()
-                                nodes = self._build_forward_nodes(
+                                nodes = await self._build_forward_nodes(
                                     selected_game.get("name", "未知游戏"),
                                     resources,
                                     bot_uin,
                                     shionlib_games,
+                                    touchgal_game=selected_game,
                                 )
                                 await event.send(event.chain_result(nodes))
                             else:
@@ -569,6 +893,7 @@ class TouchGalPlugin(Star):
                                     selected_game.get("name", "未知游戏"),
                                     resources,
                                     shionlib_games,
+                                    touchgal_game=selected_game,
                                 )
                                 await event.send(event.plain_result(message_text))
 
@@ -614,13 +939,14 @@ class TouchGalPlugin(Star):
                 del self.active_sessions[session_id]
             event.stop_event()
 
-    def _build_forward_nodes(
+    async def _build_forward_nodes(
         self,
         game_name: str,
         resources: List[dict],
         bot_uin: str = "10000",
         shionlib_games: Optional[List[dict]] = None,
         touchgal_suggestions: Optional[List[dict]] = None,
+        touchgal_game: Optional[dict] = None,
     ):
         """
         将资源列表构建成一个合并转发消息。
@@ -632,6 +958,7 @@ class TouchGalPlugin(Star):
             bot_uin: 机器人的 QQ 号，用于显示头像
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选，自动搜索时使用）
+            touchgal_game: TouchGal 当前选中的游戏（可选）
         """
         from astrbot.api.message_components import Image, Node, Nodes, Plain
 
@@ -678,21 +1005,44 @@ class TouchGalPlugin(Star):
                 game_url = self._build_touchgal_game_url(game)
                 suggest_content = [
                     Plain(f"━━ 推荐 {idx} ━━\n\n"),
-                    Plain(f"🎮 {game.get('name', '未知')}\n\n"),
-                    Plain("▶ 点击访问\n"),
-                    Plain(f"{game_url}"),
                 ]
+                await self._append_touchgal_image_component(
+                    suggest_content,
+                    game,
+                    Image,
+                    Plain,
+                )
+                suggest_content.extend(
+                    [
+                        Plain(f"🎮 {game.get('name', '未知')}\n\n"),
+                        Plain("▶ 点击访问\n"),
+                        Plain(f"{game_url}"),
+                    ]
+                )
                 node_list.append(Node(uin=bot_uin, content=suggest_content))
 
         # ========== TouchGal 资源 ==========
         if resources:
+            current_game = touchgal_game
+            if current_game is None and touchgal_suggestions:
+                current_game = touchgal_suggestions[0]
             touchgal_header = [
                 Plain("📦 TouchGal 资源站\n"),
                 Plain("━━━━━━━━━━\n\n"),
-                Plain(f"📍 {self.domain}\n"),
-                Plain(f"🎮 {game_name}\n"),
-                Plain(f"📦 共 {len(resources)} 个资源"),
             ]
+            await self._append_touchgal_image_component(
+                touchgal_header,
+                current_game,
+                Image,
+                Plain,
+            )
+            touchgal_header.extend(
+                [
+                    Plain(f"📍 {self.domain}\n"),
+                    Plain(f"🎮 {game_name}\n"),
+                    Plain(f"📦 共 {len(resources)} 个资源"),
+                ]
+            )
             node_list.append(Node(uin=bot_uin, content=touchgal_header))
 
             # 每个资源单独作为一个节点
@@ -728,6 +1078,7 @@ class TouchGalPlugin(Star):
         resources: List[dict],
         shionlib_games: Optional[List[dict]] = None,
         touchgal_suggestions: Optional[List[dict]] = None,
+        touchgal_game: Optional[dict] = None,
     ) -> str:
         """
         构建单条消息文本（用于不支持合并转发的平台）
@@ -737,6 +1088,7 @@ class TouchGalPlugin(Star):
             resources: 资源列表
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选）
+            touchgal_game: TouchGal 当前选中的游戏（可选）
 
         Returns:
             格式化的消息文本
@@ -761,13 +1113,23 @@ class TouchGalPlugin(Star):
             for game in touchgal_suggestions:
                 game_url = self._build_touchgal_game_url(game)
                 lines.append(f"🎮 {game.get('name', '未知')}")
+                image_url = self._get_touchgal_image_url(game)
+                if image_url:
+                    lines.append(f"🖼 {image_url}")
                 lines.append(f"▶ {game_url}")
             lines.append("")
 
         # ========== TouchGal 资源 ==========
         if resources:
+            current_game = touchgal_game
+            if current_game is None and touchgal_suggestions:
+                current_game = touchgal_suggestions[0]
+            image_url = self._get_touchgal_image_url(current_game)
+
             lines.append(f"📦 TouchGal 资源站 ({self.domain})")
             lines.append("━━━━━━━━━━")
+            if image_url:
+                lines.append(f"🖼 {image_url}")
             lines.append(f"🎮 {game_name} | 📦 共 {len(resources)} 个资源")
             lines.append("")
 
@@ -942,6 +1304,7 @@ class TouchGalPlugin(Star):
         game_name = None
         resources = []
         touchgal_suggestions = None
+        first_game = None
 
         # TouchGal 有结果
         if games:
@@ -969,14 +1332,23 @@ class TouchGalPlugin(Star):
         if self._is_forward_supported(event):
             # QQ 平台：使用合并转发消息
             bot_uin = event.get_self_id()
-            nodes = self._build_forward_nodes(
-                game_name, resources, bot_uin, shionlib_games, touchgal_suggestions
+            nodes = await self._build_forward_nodes(
+                game_name,
+                resources,
+                bot_uin,
+                shionlib_games,
+                touchgal_suggestions,
+                first_game,
             )
             yield event.chain_result(nodes)
         else:
             # 其他平台：发送单条消息
             message_text = self._build_single_message(
-                game_name, resources, shionlib_games, touchgal_suggestions
+                game_name,
+                resources,
+                shionlib_games,
+                touchgal_suggestions,
+                first_game,
             )
             yield event.plain_result(message_text)
 

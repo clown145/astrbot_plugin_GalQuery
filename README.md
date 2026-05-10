@@ -8,6 +8,7 @@
 - 🤖 **自动搜索**：检测群聊中的资源请求，自动搜索并返回结果
 - 🧰 **Agent 工具**：注册 `search_galgame_resources`，可供大模型按需调用
 - 📦 **合并转发**：资源以合并转发消息形式发送，每个资源独立展示
+- 🖼 **图片展示**：TouchGal 游戏横幅和书音封面会随推荐/资源一起展示
 - 📚 **多站点支持**：同时显示 TouchGal 和书音的图书馆的搜索结果
 - 🔐 **NSFW 支持**：一键开关即可搜索 NSFW 内容
 - 🎯 **群聊过滤**：支持白名单/黑名单模式，控制自动搜索生效范围
@@ -92,6 +93,7 @@ https://shionlib.com/zh/game/708
 
 📦 TouchGal 资源站
 ━━━━━━━━━━
+🖼 https://cloud.touchgaloss.com/patch/xxx/banner/banner.avif
 📍 www.touchgal.top
 🎮 千恋万花
 📦 共 2 个资源
