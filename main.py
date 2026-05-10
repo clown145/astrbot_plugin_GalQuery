@@ -16,7 +16,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.14")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.15")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -1058,20 +1058,21 @@ class TouchGalPlugin(Star):
                         Plain(f"{game_url}"),
                     ]
                 )
-                node_list.append(Node(uin=bot_uin, content=game_content))
 
                 if not group_resources:
-                    empty_content = [
-                        Plain(f"━━ 游戏 {game_idx} / 资源 ━━\n\n"),
-                        Plain("未获取到该游戏的资源链接。"),
-                    ]
-                    node_list.append(Node(uin=bot_uin, content=empty_content))
+                    game_content.extend(
+                        [
+                            Plain("\n\n"),
+                            Plain("未获取到该游戏的资源链接。"),
+                        ]
+                    )
+                    node_list.append(Node(uin=bot_uin, content=game_content))
                     continue
 
+                resource_nodes = []
                 for res_idx, res in enumerate(group_resources, 1):
-                    content_parts = [
+                    resource_content = [
                         Plain(f"━━ 游戏 {game_idx} / 资源 {res_idx} ━━\n\n"),
-                        Plain(f"🎮 {game.get('name', '未知')}\n"),
                         Plain(f"📦 {res.get('name', '未知')}\n\n"),
                         Plain("▶ 下载链接\n"),
                         Plain(f"{res.get('content', '无')}"),
@@ -1082,15 +1083,18 @@ class TouchGalPlugin(Star):
                     note = res.get("note", "")
 
                     if password or code or note:
-                        content_parts.append(Plain("\n\n"))
+                        resource_content.append(Plain("\n\n"))
                     if password:
-                        content_parts.append(Plain(f"🔐 密码: {password}\n"))
+                        resource_content.append(Plain(f"🔐 密码: {password}\n"))
                     if code:
-                        content_parts.append(Plain(f"📝 提取码: {code}\n"))
+                        resource_content.append(Plain(f"📝 提取码: {code}\n"))
                     if note:
-                        content_parts.append(Plain(f"💬 备注: {note}"))
+                        resource_content.append(Plain(f"💬 备注: {note}"))
 
-                    node_list.append(Node(uin=bot_uin, content=content_parts))
+                    resource_nodes.append(Node(uin=bot_uin, content=resource_content))
+
+                game_content.extend([Plain("\n\n"), Nodes(resource_nodes)])
+                node_list.append(Node(uin=bot_uin, content=game_content))
 
         # ========== TouchGal 推荐游戏（自动搜索时显示） ==========
         elif touchgal_suggestions and len(touchgal_suggestions) > 1:
