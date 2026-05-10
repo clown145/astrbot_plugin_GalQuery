@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.10
+- fix: 收窄书音封面图床修复范围，避免影响插件加载
+  - 移除 1.0.9 新增的图片域名配置项
+  - 仅在解析封面 URL 时将 `shionlib.com/game/` 修正为 `t.shionlib.com/game/`
+
 ## v1.0.9
 - fix: 修正书音封面图真实图床域名
   - 将 `/game/.../cover/...` 封面路径解析到 `t.shionlib.com`

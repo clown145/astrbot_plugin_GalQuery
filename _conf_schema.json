@@ -11,12 +11,6 @@
         "hint": "Shionlib 网站的主域名（不含 https:// 前缀）。当网站更换域名时可在此修改。",
         "default": "shionlib.com"
     },
-    "shionlib_image_domain": {
-        "description": "书音的图书馆图片域名",
-        "type": "string",
-        "hint": "Shionlib 封面图使用的图片域名（不含 https:// 前缀）。默认图床域名为 t.shionlib.com。",
-        "default": "t.shionlib.com"
-    },
     "shionlib_enabled": {
         "description": "启用 Shionlib 推荐",
         "type": "bool",
