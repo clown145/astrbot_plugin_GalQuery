@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.16
+- fix: 修复 TouchGal 资源嵌套合并转发无法发送
+  - 不再把 `Nodes` 放进 `Node.content`，避免生成 QQ/OneBot 不接受的嵌套消息段
+  - 自动搜索中每个 TouchGal 游戏改为独立合并转发，游戏信息和该游戏资源在同一条转发内展示
+
 ## v1.0.15
 - feat: 尝试 TouchGal 资源嵌套合并转发
   - 自动搜索中每个 TouchGal 游戏作为外层节点，资源作为该游戏节点内的嵌套转发
