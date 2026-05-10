@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.14
+- feat: 自动搜索按 TouchGal 游戏分组展示资源
+  - 搜到多个 TouchGal 游戏时，合并转发按“游戏信息 -> 该游戏资源”顺序排列
+  - 保持单层合并转发结构，避免嵌套转发在 QQ 端不稳定
+
 ## v1.0.13
 - feat: 增加 TouchGal 游戏图片展示
   - 从 TouchGal 搜索结果或详情页提取游戏 `banner` 图片

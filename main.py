@@ -16,7 +16,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.13")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.14")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -690,6 +690,34 @@ class TouchGalPlugin(Star):
 
         content.append(Plain(f"🖼 {image_url}\n\n"))
 
+    async def _build_touchgal_groups_async(
+        self, games: List[dict]
+    ) -> List[dict]:
+        """为 TouchGal 搜索结果整理按游戏分组的资源数据。"""
+        valid_games = [game for game in games if isinstance(game, dict)]
+        if not valid_games:
+            return []
+
+        resource_results = await asyncio.gather(
+            *(self.get_links_async(game) for game in valid_games),
+            return_exceptions=True,
+        )
+
+        groups = []
+        for game, resources in zip(valid_games, resource_results):
+            if isinstance(resources, Exception):
+                logger.warning(f"TouchGal get grouped resources failed: {resources}")
+                resources = []
+
+            groups.append(
+                {
+                    "game": game,
+                    "resources": resources,
+                }
+            )
+
+        return groups
+
     async def _search_resources_for_agent(self, keyword: str) -> str:
         """执行一次非交互式搜索，供 Agent 工具调用。"""
         keyword = str(keyword or "").strip()
@@ -947,6 +975,7 @@ class TouchGalPlugin(Star):
         shionlib_games: Optional[List[dict]] = None,
         touchgal_suggestions: Optional[List[dict]] = None,
         touchgal_game: Optional[dict] = None,
+        touchgal_groups: Optional[List[dict]] = None,
     ):
         """
         将资源列表构建成一个合并转发消息。
@@ -959,6 +988,7 @@ class TouchGalPlugin(Star):
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选，自动搜索时使用）
             touchgal_game: TouchGal 当前选中的游戏（可选）
+            touchgal_groups: TouchGal 游戏与资源分组（可选）
         """
         from astrbot.api.message_components import Image, Node, Nodes, Plain
 
@@ -989,8 +1019,81 @@ class TouchGalPlugin(Star):
                 )
                 node_list.append(Node(uin=bot_uin, content=game_content))
 
+        # ========== TouchGal 游戏与资源分组 ==========
+        if touchgal_groups:
+            touchgal_total = len(touchgal_groups)
+            resource_total = sum(
+                len(group.get("resources") or [])
+                for group in touchgal_groups
+                if isinstance(group, dict)
+            )
+            touchgal_header = [
+                Plain("📦 TouchGal 资源站\n"),
+                Plain("━━━━━━━━━━\n\n"),
+                Plain(f"📍 {self.domain}\n"),
+                Plain(f"🎮 共 {touchgal_total} 个相关游戏\n"),
+                Plain(f"📦 共 {resource_total} 个资源"),
+            ]
+            node_list.append(Node(uin=bot_uin, content=touchgal_header))
+
+            for game_idx, group in enumerate(touchgal_groups, 1):
+                if not isinstance(group, dict):
+                    continue
+
+                game = group.get("game") or {}
+                group_resources = group.get("resources") or []
+                game_url = self._build_touchgal_game_url(game)
+                game_content = [Plain(f"━━ 游戏 {game_idx} ━━\n\n")]
+                await self._append_touchgal_image_component(
+                    game_content,
+                    game,
+                    Image,
+                    Plain,
+                )
+                game_content.extend(
+                    [
+                        Plain(f"🎮 {game.get('name', '未知')}\n"),
+                        Plain(f"📦 共 {len(group_resources)} 个资源\n\n"),
+                        Plain("▶ 点击访问\n"),
+                        Plain(f"{game_url}"),
+                    ]
+                )
+                node_list.append(Node(uin=bot_uin, content=game_content))
+
+                if not group_resources:
+                    empty_content = [
+                        Plain(f"━━ 游戏 {game_idx} / 资源 ━━\n\n"),
+                        Plain("未获取到该游戏的资源链接。"),
+                    ]
+                    node_list.append(Node(uin=bot_uin, content=empty_content))
+                    continue
+
+                for res_idx, res in enumerate(group_resources, 1):
+                    content_parts = [
+                        Plain(f"━━ 游戏 {game_idx} / 资源 {res_idx} ━━\n\n"),
+                        Plain(f"🎮 {game.get('name', '未知')}\n"),
+                        Plain(f"📦 {res.get('name', '未知')}\n\n"),
+                        Plain("▶ 下载链接\n"),
+                        Plain(f"{res.get('content', '无')}"),
+                    ]
+
+                    password = res.get("password", "")
+                    code = res.get("code", "")
+                    note = res.get("note", "")
+
+                    if password or code or note:
+                        content_parts.append(Plain("\n\n"))
+                    if password:
+                        content_parts.append(Plain(f"🔐 密码: {password}\n"))
+                    if code:
+                        content_parts.append(Plain(f"📝 提取码: {code}\n"))
+                    if note:
+                        content_parts.append(Plain(f"💬 备注: {note}"))
+
+                    node_list.append(Node(uin=bot_uin, content=content_parts))
+
         # ========== TouchGal 推荐游戏（自动搜索时显示） ==========
-        if touchgal_suggestions and len(touchgal_suggestions) > 1:
+        elif touchgal_suggestions and len(touchgal_suggestions) > 1:
             # TouchGal 推荐站点信息
             suggest_header = [
                 Plain("📦 TouchGal 相关推荐\n"),
@@ -1022,7 +1125,7 @@ class TouchGalPlugin(Star):
                 node_list.append(Node(uin=bot_uin, content=suggest_content))
 
         # ========== TouchGal 资源 ==========
-        if resources:
+        if resources and not touchgal_groups:
             current_game = touchgal_game
             if current_game is None and touchgal_suggestions:
                 current_game = touchgal_suggestions[0]
@@ -1079,6 +1182,7 @@ class TouchGalPlugin(Star):
         shionlib_games: Optional[List[dict]] = None,
         touchgal_suggestions: Optional[List[dict]] = None,
         touchgal_game: Optional[dict] = None,
+        touchgal_groups: Optional[List[dict]] = None,
     ) -> str:
         """
         构建单条消息文本（用于不支持合并转发的平台）
@@ -1089,6 +1193,7 @@ class TouchGalPlugin(Star):
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选）
             touchgal_game: TouchGal 当前选中的游戏（可选）
+            touchgal_groups: TouchGal 游戏与资源分组（可选）
 
         Returns:
             格式化的消息文本
@@ -1106,8 +1211,52 @@ class TouchGalPlugin(Star):
                 lines.append(f"▶ {game['url']}")
             lines.append("")
 
+        # ========== TouchGal 游戏与资源分组 ==========
+        if touchgal_groups:
+            resource_total = sum(
+                len(group.get("resources") or [])
+                for group in touchgal_groups
+                if isinstance(group, dict)
+            )
+            lines.append(f"📦 TouchGal 资源站 ({self.domain})")
+            lines.append("━━━━━━━━━━")
+            lines.append(f"🎮 共 {len(touchgal_groups)} 个相关游戏 | 📦 共 {resource_total} 个资源")
+            lines.append("")
+
+            for game_idx, group in enumerate(touchgal_groups, 1):
+                if not isinstance(group, dict):
+                    continue
+
+                game = group.get("game") or {}
+                group_resources = group.get("resources") or []
+                game_url = self._build_touchgal_game_url(game)
+                image_url = self._get_touchgal_image_url(game)
+
+                lines.append(f"━━ 游戏 {game_idx} ━━")
+                lines.append(f"🎮 {game.get('name', '未知')}")
+                if image_url:
+                    lines.append(f"🖼 {image_url}")
+                lines.append(f"▶ {game_url}")
+                lines.append(f"📦 共 {len(group_resources)} 个资源")
+
+                for res_idx, res in enumerate(group_resources, 1):
+                    lines.append(f"━━ 游戏 {game_idx} / 资源 {res_idx} ━━")
+                    lines.append(f"📦 {res.get('name', '未知')}")
+                    lines.append(f"▶ {res.get('content', '无')}")
+
+                    extras = []
+                    if res.get("password"):
+                        extras.append(f"🔐 密码: {res['password']}")
+                    if res.get("code"):
+                        extras.append(f"📝 提取码: {res['code']}")
+                    if res.get("note"):
+                        extras.append(f"💬 备注: {res['note']}")
+                    if extras:
+                        lines.append(" | ".join(extras))
+                lines.append("")
+
         # ========== TouchGal 推荐 ==========
-        if touchgal_suggestions and len(touchgal_suggestions) > 1:
+        elif touchgal_suggestions and len(touchgal_suggestions) > 1:
             lines.append(f"📦 TouchGal 相关推荐 ({self.domain})")
             lines.append("━━━━━━━━━━")
             for game in touchgal_suggestions:
@@ -1120,7 +1269,7 @@ class TouchGalPlugin(Star):
             lines.append("")
 
         # ========== TouchGal 资源 ==========
-        if resources:
+        if resources and not touchgal_groups:
             current_game = touchgal_game
             if current_game is None and touchgal_suggestions:
                 current_game = touchgal_suggestions[0]
@@ -1305,6 +1454,7 @@ class TouchGalPlugin(Star):
         resources = []
         touchgal_suggestions = None
         first_game = None
+        touchgal_groups = []
 
         # TouchGal 有结果
         if games:
@@ -1315,14 +1465,21 @@ class TouchGalPlugin(Star):
             # 非静默模式：发送进度提示
             if not silent_mode:
                 yield event.plain_result(
-                    f"✅ 找到游戏「{game_name}」，正在获取资源链接..."
+                    f"✅ 找到 {len(games)} 个相关游戏，正在获取资源链接..."
                 )
 
-            # 获取资源链接
-            resources = await self.get_links_async(first_game)
+            touchgal_groups = await self._build_touchgal_groups_async(games)
+            resource_groups = [
+                group for group in touchgal_groups if group.get("resources")
+            ]
+            touchgal_groups = resource_groups
+            if touchgal_groups:
+                first_game = touchgal_groups[0]["game"]
+                game_name = first_game.get("name", "未知游戏")
+                resources = touchgal_groups[0]["resources"]
 
         # 如果 TouchGal 没有资源但书音有结果，也发送
-        if not resources and not shionlib_games:
+        if not touchgal_groups and not shionlib_games:
             if not silent_mode:
                 yield event.plain_result(f"😔 未能获取到资源链接。")
                 event.stop_event()
@@ -1339,6 +1496,7 @@ class TouchGalPlugin(Star):
                 shionlib_games,
                 touchgal_suggestions,
                 first_game,
+                touchgal_groups,
             )
             yield event.chain_result(nodes)
         else:
@@ -1349,6 +1507,7 @@ class TouchGalPlugin(Star):
                 shionlib_games,
                 touchgal_suggestions,
                 first_game,
+                touchgal_groups,
             )
             yield event.plain_result(message_text)
 
