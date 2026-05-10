@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.17
+- fix: 自动搜索展示回退到单条扁平分组合并转发
+  - TouchGal 多游戏结果恢复 v1.0.14 的“游戏信息 -> 该游戏资源”排列
+  - 新增 `shionlib_image_domain` 配置，用于调整书音封面图片域名
+  - 新增 `touchgal_resource_limit_per_game` 配置，默认每个 TouchGal 游戏展示 3 个资源，`-1` 表示全部
+
 ## v1.0.16
 - fix: 修复 TouchGal 资源嵌套合并转发无法发送
   - 不再把 `Nodes` 放进 `Node.content`，避免生成 QQ/OneBot 不接受的嵌套消息段

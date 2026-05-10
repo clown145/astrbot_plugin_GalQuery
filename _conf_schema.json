@@ -11,6 +11,12 @@
         "hint": "Shionlib 网站的主域名（不含 https:// 前缀）。当网站更换域名时可在此修改。",
         "default": "shionlib.com"
     },
+    "shionlib_image_domain": {
+        "description": "书音封面图片域名",
+        "type": "string",
+        "hint": "书音封面图片使用的图床域名（不含 https:// 前缀）。默认使用 t.shionlib.com。",
+        "default": "t.shionlib.com"
+    },
     "shionlib_enabled": {
         "description": "启用 Shionlib 推荐",
         "type": "bool",
@@ -48,6 +54,12 @@
         "type": "int",
         "hint": "自动搜索时，在资源链接前显示的 TouchGal 相关游戏页面链接数量。",
         "default": 5
+    },
+    "touchgal_resource_limit_per_game": {
+        "description": "每个 TouchGal 游戏获取资源数",
+        "type": "int",
+        "hint": "自动搜索时，每个搜索到的 TouchGal 游戏最多展示多少个资源。-1 表示获取全部，0 表示只展示游戏信息不展示资源。",
+        "default": 3
     },
     "auto_search_shionlib": {
         "description": "自动搜索时同时搜索书音",

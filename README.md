@@ -7,7 +7,7 @@
 - 🔍 **指令搜索**：通过 `/搜索 <游戏名>` 命令搜索资源
 - 🤖 **自动搜索**：检测群聊中的资源请求，自动搜索并返回结果
 - 🧰 **Agent 工具**：注册 `search_galgame_resources`，可供大模型按需调用
-- 📦 **合并转发**：资源以合并转发消息形式发送，自动搜索会按 TouchGal 游戏拆成独立合并转发
+- 📦 **合并转发**：资源以合并转发消息形式发送，自动搜索会按 TouchGal 游戏分组展示资源
 - 🖼 **图片展示**：TouchGal 游戏横幅和书音封面会随推荐/资源一起展示
 - 📚 **多站点支持**：同时显示 TouchGal 和书音的图书馆的搜索结果
 - 🔐 **NSFW 支持**：一键开关即可搜索 NSFW 内容
@@ -26,12 +26,14 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 |--------|------|--------|------|
 | `touchgal_domain` | string | `www.touchgal.top` | TouchGal 网站域名 |
 | `shionlib_domain` | string | `shionlib.com` | 书音的图书馆网站域名 |
+| `shionlib_image_domain` | string | `t.shionlib.com` | 书音封面图片域名 |
 | `shionlib_enabled` | bool | true | 启用书音的图书馆推荐 |
 | `shionlib_limit` | int | 3 | 返回的书音推荐数量 |
 | `show_nsfw` | bool | false | 开启后可搜索 NSFW 内容 |
 | `session_timeout` | int | 60 | 搜索会话超时时间（秒） |
 | `auto_search_enabled` | bool | false | 启用自动搜索功能 |
 | `auto_search_suggest_limit` | int | 5 | 自动搜索时显示的相关游戏推荐数量 |
+| `touchgal_resource_limit_per_game` | int | 3 | 每个 TouchGal 游戏最多展示资源数，`-1` 表示全部 |
 | `auto_search_shionlib` | bool | true | 自动搜索时同时搜索书音 |
 | `auto_search_silent` | bool | true | 静默模式（搜不到不回复） |
 | `auto_search_pattern` | string | 正则表达式 | 自动搜索的匹配模式 |
@@ -103,7 +105,10 @@ https://shionlib.com/zh/game/708
 ▶ 点击访问
 https://www.touchgal.top/xxxx
 
-同一游戏的资源会跟在游戏信息后，作为该游戏合并转发内的独立节点。
+━━ 游戏 1 / 资源 1 ━━
+📦 汉化组版本
+▶ 下载链接
+https://pan.baidu.com/xxx
 ```
 
 ## 📋 平台支持
