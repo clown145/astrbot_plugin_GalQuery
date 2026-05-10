@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.12
+- feat: 恢复书音封面图片展示
+  - 基于 `t.shionlib.com` 真实图片地址，在合并转发节点中重新发送封面图片
+
 ## v1.0.11
 - fix: 修正 `metadata.yaml` 插件名格式
   - 将 `name` 改为合法插件 ID `astrbot_plugin_galquery`
