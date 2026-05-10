@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.11
+- fix: 修正 `metadata.yaml` 插件名格式
+  - 将 `name` 改为合法插件 ID `astrbot_plugin_galquery`
+  - 将中文展示名移动到 `display_name`
+
 ## v1.0.10
 - fix: 收窄书音封面图床修复范围，避免影响插件加载
   - 移除 1.0.9 新增的图片域名配置项

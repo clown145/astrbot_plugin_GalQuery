@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.10")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.11")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
