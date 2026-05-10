@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.6")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.7")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -21,7 +21,7 @@ class TouchGalPlugin(Star):
         self.domain = self.config.get("touchgal_domain", "www.touchgal.top")
         self.shionlib_domain = self.config.get("shionlib_domain", "shionlib.com")
         self.shionlib_enabled = self.config.get("shionlib_enabled", True)
-        self.shionlib_limit = self.config.get("shionlib_limit", 1)
+        self.shionlib_limit = self.config.get("shionlib_limit", 3)
         self.active_sessions: Dict[str, SessionController] = {}
 
         # 初始化通用请求头
@@ -222,6 +222,20 @@ class TouchGalPlugin(Star):
 
         return None
 
+    def _extract_shionlib_cover_from_chunk(self, chunk: str) -> Optional[str]:
+        """从单个 Next.js 数据块中提取封面图链接。"""
+        src_matches = re.findall(r'"src":"((?:\\.|[^"\\])*)"', chunk)
+        for raw_src in src_matches:
+            src = self._decode_json_string(raw_src).strip()
+            if not src or "/cover/" not in src:
+                continue
+
+            if src.startswith("http://") or src.startswith("https://"):
+                return src
+            return f"https://{self.shionlib_domain}/{src.lstrip('/')}"
+
+        return None
+
     def _parse_shionlib_games(self, html: str, limit: int) -> List[dict]:
         """解析 Shionlib 当前 Next.js 搜索页中的游戏数据。"""
         games = []
@@ -248,12 +262,14 @@ class TouchGalPlugin(Star):
             game_name = self._extract_shionlib_name_from_chunk(chunk)
             if not game_name:
                 game_name = f"游戏 #{game_id}"
+            cover_url = self._extract_shionlib_cover_from_chunk(chunk)
 
             games.append(
                 {
                     "id": game_id,
                     "name": game_name,
                     "url": f"https://{self.shionlib_domain}{href}",
+                    "cover": cover_url,
                 }
             )
             seen_ids.add(game_id)
@@ -281,6 +297,7 @@ class TouchGalPlugin(Star):
                     "id": game_id,
                     "name": game_name,
                     "url": f"https://{self.shionlib_domain}{href}",
+                    "cover": None,
                 }
             )
             seen_ids.add(game_id)
@@ -292,14 +309,14 @@ class TouchGalPlugin(Star):
 
     async def search_shionlib_async(self, keyword: str, limit: int = 5) -> List[dict]:
         """
-        异步搜索 Shionlib 资源站，返回游戏列表（仅包含名称和链接）
+        异步搜索 Shionlib 资源站，返回游戏列表。
 
         Args:
             keyword: 搜索关键词
             limit: 返回结果数量限制
 
         Returns:
-            游戏列表 [{'id': '708', 'name': '千恋万花', 'url': 'https://shionlib.com/zh/game/708'}, ...]
+            游戏列表 [{'id': '708', 'name': '千恋万花', 'url': 'https://shionlib.com/zh/game/708', 'cover': 'https://...'}, ...]
         """
         search_url = f"https://{self.shionlib_domain}/zh/search/game"
         params = {"q": keyword}
@@ -339,6 +356,68 @@ class TouchGalPlugin(Star):
         except Exception as e:
             logger.error(f"Shionlib 搜索异常: {e}")
             return []
+
+    def _build_touchgal_game_url(self, game: dict) -> str:
+        """构建 TouchGal 游戏详情页链接。"""
+        unique_id = game.get("uniqueId") or game.get("unique_id") or ""
+        return f"https://{self.domain}/{unique_id}" if unique_id else ""
+
+    async def _search_resources_for_agent(self, keyword: str) -> str:
+        """执行一次非交互式搜索，供 Agent 工具调用。"""
+        keyword = str(keyword or "").strip()
+        if not keyword:
+            return "搜索关键词不能为空。"
+
+        games = await self.search_games_async(keyword, page=1, limit=5)
+        shionlib_games = []
+        if self.shionlib_enabled:
+            shionlib_games = await self.search_shionlib_async(
+                keyword,
+                limit=self.shionlib_limit,
+            )
+
+        if not games and not shionlib_games:
+            return f"没有找到与「{keyword}」相关的游戏资源。"
+
+        resources = []
+        selected_game = games[0] if games else None
+        if selected_game:
+            resources = await self.get_links_async(selected_game)
+
+        game_name = selected_game.get("name", keyword) if selected_game else keyword
+        touchgal_suggestions = games if len(games) > 1 else None
+        message = self._build_single_message(
+            game_name,
+            resources,
+            shionlib_games,
+            touchgal_suggestions,
+        )
+
+        if selected_game and not resources:
+            touchgal_url = self._build_touchgal_game_url(selected_game)
+            lines = [
+                f"TouchGal 找到「{game_name}」，但未获取到资源链接。",
+            ]
+            if touchgal_url:
+                lines.append(f"游戏页面: {touchgal_url}")
+            if message:
+                lines.extend(["", message])
+            return "\n".join(lines).strip()
+
+        return message or f"找到与「{keyword}」相关的结果，但没有可展示的资源链接。"
+
+    @filter.llm_tool(name="search_galgame_resources")
+    async def search_galgame_resources_tool(
+        self,
+        event: AstrMessageEvent,
+        keyword: str,
+    ) -> str:
+        """搜索 Galgame 资源链接，优先返回 TouchGal 资源，并附带书音的图书馆推荐。
+
+        Args:
+            keyword(string): 要搜索的游戏名称或关键词。
+        """
+        return await self._search_resources_for_agent(keyword)
 
     @filter.command("搜索")
     async def search_command(self, event: AstrMessageEvent, keyword: str):
@@ -548,7 +627,7 @@ class TouchGalPlugin(Star):
             shionlib_games: Shionlib 搜索结果列表（可选）
             touchgal_suggestions: TouchGal 推荐游戏列表（可选，自动搜索时使用）
         """
-        from astrbot.api.message_components import Node, Nodes, Plain
+        from astrbot.api.message_components import Node, Nodes, Plain, Image
 
         node_list = []
 
@@ -564,12 +643,17 @@ class TouchGalPlugin(Star):
 
             # 每个游戏详情单独一个节点
             for idx, game in enumerate(shionlib_games, 1):
-                game_content = [
-                    Plain(f"━━ 推荐 {idx} ━━\n\n"),
-                    Plain(f"🎮 {game['name']}\n\n"),
-                    Plain("▶ 点击访问\n"),
-                    Plain(f"{game['url']}"),
-                ]
+                game_content = [Plain(f"━━ 推荐 {idx} ━━\n\n")]
+                if game.get("cover"):
+                    game_content.append(Image.fromURL(game["cover"]))
+                    game_content.append(Plain("\n"))
+                game_content.extend(
+                    [
+                        Plain(f"🎮 {game['name']}\n\n"),
+                        Plain("▶ 点击访问\n"),
+                        Plain(f"{game['url']}"),
+                    ]
+                )
                 node_list.append(Node(uin=bot_uin, content=game_content))
 
         # ========== TouchGal 推荐游戏（自动搜索时显示） ==========
@@ -585,8 +669,7 @@ class TouchGalPlugin(Star):
 
             # 每个推荐游戏单独一个节点
             for idx, game in enumerate(touchgal_suggestions, 1):
-                unique_id = game.get("uniqueId", "")
-                game_url = f"https://{self.domain}/{unique_id}" if unique_id else ""
+                game_url = self._build_touchgal_game_url(game)
                 suggest_content = [
                     Plain(f"━━ 推荐 {idx} ━━\n\n"),
                     Plain(f"🎮 {game.get('name', '未知')}\n\n"),
@@ -660,6 +743,8 @@ class TouchGalPlugin(Star):
             lines.append("━━━━━━━━━━")
             for game in shionlib_games:
                 lines.append(f"🎮 {game['name']}")
+                if game.get("cover"):
+                    lines.append(f"🖼 {game['cover']}")
                 lines.append(f"▶ {game['url']}")
             lines.append("")
 
@@ -668,8 +753,7 @@ class TouchGalPlugin(Star):
             lines.append(f"📦 TouchGal 相关推荐 ({self.domain})")
             lines.append("━━━━━━━━━━")
             for game in touchgal_suggestions:
-                unique_id = game.get("uniqueId", "")
-                game_url = f"https://{self.domain}/{unique_id}" if unique_id else ""
+                game_url = self._build_touchgal_game_url(game)
                 lines.append(f"🎮 {game.get('name', '未知')}")
                 lines.append(f"▶ {game_url}")
             lines.append("")

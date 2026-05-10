@@ -21,7 +21,7 @@
         "description": "Shionlib 推荐数量",
         "type": "int",
         "hint": "返回的 Shionlib 相关游戏链接数量（每个链接单独一条消息）。",
-        "default": 1
+        "default": 3
     },
     "show_nsfw": {
         "description": "显示 NSFW 内容",

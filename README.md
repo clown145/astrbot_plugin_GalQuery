@@ -6,6 +6,7 @@
 
 - 🔍 **指令搜索**：通过 `/搜索 <游戏名>` 命令搜索资源
 - 🤖 **自动搜索**：检测群聊中的资源请求，自动搜索并返回结果
+- 🧰 **Agent 工具**：注册 `search_galgame_resources`，可供大模型按需调用
 - 📦 **合并转发**：资源以合并转发消息形式发送，每个资源独立展示
 - 📚 **多站点支持**：同时显示 TouchGal 和书音的图书馆的搜索结果
 - 🔐 **NSFW 支持**：一键开关即可搜索 NSFW 内容
@@ -25,7 +26,7 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 | `touchgal_domain` | string | `www.touchgal.top` | TouchGal 网站域名 |
 | `shionlib_domain` | string | `shionlib.com` | 书音的图书馆网站域名 |
 | `shionlib_enabled` | bool | true | 启用书音的图书馆推荐 |
-| `shionlib_limit` | int | 1 | 返回的书音推荐数量 |
+| `shionlib_limit` | int | 3 | 返回的书音推荐数量 |
 | `show_nsfw` | bool | false | 开启后可搜索 NSFW 内容 |
 | `session_timeout` | int | 60 | 搜索会话超时时间（秒） |
 | `auto_search_enabled` | bool | false | 启用自动搜索功能 |
@@ -61,6 +62,13 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 - ...
 
 静默模式下只有搜到资源才会回复。
+
+### Agent 工具
+
+插件会注册 `search_galgame_resources` 工具，供 AstrBot Agent 在对话中搜索 Galgame 资源。
+
+参数：
+- `keyword`：游戏名称或搜索关键词
 
 ### 群聊过滤
 

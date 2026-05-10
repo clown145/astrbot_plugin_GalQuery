@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.7
+- feat: 优化书音推荐展示
+  - 为书音推荐结果增加封面图
+  - 将 `shionlib_limit` 默认值从 `1` 调整为 `3`
+- feat: 注册 Agent 工具
+  - 新增 `search_galgame_resources` 工具，供大模型搜索 Galgame 资源
+  - 复用现有 TouchGal 与书音搜索逻辑，返回非交互式文本结果
+
 ## v1.0.6
 - fix: 修复 TouchGal 最近无法搜索的问题
   - 补充 `X-Requested-With: kun-fetch` 请求头，兼容站点新的来源校验
