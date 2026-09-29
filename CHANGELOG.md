@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.18
+- feat: 资源消息自动撤回
+  - 新增 `auto_recall_enabled` / `auto_recall_delay` 配置，自动搜索和 `/搜索` 的资源合并转发会在指定秒数后撤回
+  - 开启后直接调用 OneBot `send_*_forward_msg` 以获取 `message_id`，再定时调用 `delete_msg`
+  - 插件卸载或重载时取消未执行的撤回任务
+
 ## v1.0.17
 - fix: 自动搜索展示回退到单条扁平分组合并转发
   - TouchGal 多游戏结果恢复 v1.0.14 的“游戏信息 -> 该游戏资源”排列

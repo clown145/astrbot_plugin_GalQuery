@@ -16,7 +16,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
 
-@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.17")
+@register("touchgal_search", "AI Assistant", "从 TouchGal 搜索游戏资源", "1.0.18")
 class TouchGalPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -36,6 +36,13 @@ class TouchGalPlugin(Star):
             )
         )
         self.active_sessions: Dict[str, SessionController] = {}
+
+        # 自动撤回配置
+        self.auto_recall_enabled = bool(self.config.get("auto_recall_enabled", False))
+        self.auto_recall_delay = self._normalize_auto_recall_delay(
+            self.config.get("auto_recall_delay", 60)
+        )
+        self._recall_tasks: set = set()
 
         # 初始化通用请求头
         self.headers = self._create_headers()
@@ -67,6 +74,20 @@ class TouchGalPlugin(Star):
         if limit < -1:
             return 3
         return limit
+
+    def _normalize_auto_recall_delay(self, value: object) -> int:
+        """标准化自动撤回延时（秒），非法值回退到 60。"""
+        try:
+            delay = int(value)
+        except (TypeError, ValueError):
+            return 60
+        return max(delay, 1)
+
+    async def terminate(self):
+        """插件卸载或重载时取消尚未执行的撤回任务。"""
+        for task in list(self._recall_tasks):
+            task.cancel()
+        self._recall_tasks.clear()
 
     def _create_headers(self) -> dict:
         """创建通用请求头"""
@@ -943,7 +964,10 @@ class TouchGalPlugin(Star):
                                     shionlib_games,
                                     touchgal_game=selected_game,
                                 )
-                                await event.send(event.chain_result(nodes))
+                                if not await self._send_forward_with_recall(
+                                    event, nodes
+                                ):
+                                    await event.send(event.chain_result(nodes))
                             else:
                                 # 其他平台：发送单条消息
                                 message_text = self._build_single_message(
@@ -1356,6 +1380,67 @@ class TouchGalPlugin(Star):
         except Exception:
             return False
 
+    async def _send_forward_with_recall(
+        self, event: AstrMessageEvent, nodes: list
+    ) -> bool:
+        """
+        开启自动撤回时，直接调用 OneBot 接口发送合并转发，以拿到 message_id 并定时撤回。
+
+        AstrBot 的 event.send() 不返回 message_id，所以这里绕过它。
+
+        Returns:
+            True 表示已发送；False 表示未启用或不适用，调用方按原方式发送
+        """
+        bot = getattr(event, "bot", None)
+        if not self.auto_recall_enabled or bot is None:
+            return False
+
+        raw_event = getattr(event.message_obj, "raw_message", None)
+        self_id = raw_event.get("self_id") if isinstance(raw_event, dict) else None
+        group_id = event.get_group_id()
+
+        for seg in nodes:
+            payload = await seg.to_dict()
+            if group_id:
+                action = "send_group_forward_msg"
+                payload["group_id"] = group_id
+            else:
+                action = "send_private_forward_msg"
+                payload["user_id"] = event.get_sender_id()
+            if self_id:
+                payload["self_id"] = self_id
+
+            result = await bot.call_action(action, **payload)
+            # 标记已发送，避免框架在未发送时继续走 LLM 默认回复
+            event._has_send_oper = True
+
+            message_id = result.get("message_id") if isinstance(result, dict) else None
+            if message_id is None:
+                logger.warning(
+                    f"TouchGal 合并转发未返回 message_id，无法自动撤回: {result}"
+                )
+                continue
+            self._schedule_recall(bot, message_id, self_id)
+
+        return True
+
+    def _schedule_recall(self, bot, message_id, self_id=None):
+        """安排在 auto_recall_delay 秒后撤回指定消息。"""
+        task = asyncio.create_task(self._recall_later(bot, message_id, self_id))
+        self._recall_tasks.add(task)
+        task.add_done_callback(self._recall_tasks.discard)
+
+    async def _recall_later(self, bot, message_id, self_id=None):
+        await asyncio.sleep(self.auto_recall_delay)
+        params = {"message_id": message_id}
+        if self_id:
+            params["self_id"] = self_id
+        try:
+            await bot.call_action("delete_msg", **params)
+            logger.debug(f"TouchGal 已自动撤回消息 {message_id}")
+        except Exception as e:
+            logger.warning(f"TouchGal 自动撤回消息 {message_id} 失败: {e}")
+
     def _should_process_group(self, event: AstrMessageEvent) -> bool:
         """
         检查当前群聊是否应该处理自动搜索
@@ -1527,7 +1612,8 @@ class TouchGalPlugin(Star):
                 first_game,
                 touchgal_groups,
             )
-            yield event.chain_result(nodes)
+            if not await self._send_forward_with_recall(event, nodes):
+                yield event.chain_result(nodes)
         else:
             # 其他平台：发送单条消息
             message_text = self._build_single_message(

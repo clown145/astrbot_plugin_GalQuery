@@ -37,6 +37,8 @@ git clone https://github.com/clown145/astrbot_plugin_touchgal
 | `auto_search_shionlib` | bool | true | 自动搜索时同时搜索书音 |
 | `auto_search_silent` | bool | true | 静默模式（搜不到不回复） |
 | `auto_search_pattern` | string | 正则表达式 | 自动搜索的匹配模式 |
+| `auto_recall_enabled` | bool | false | 资源合并转发消息发送后自动撤回（仅 QQ/OneBot） |
+| `auto_recall_delay` | int | 60 | 自动撤回延时（秒），机器人非管理员时需 ≤120 |
 | `auto_search_group_mode` | string | `blacklist` | 群聊过滤模式（whitelist/blacklist） |
 | `auto_search_group_list` | list | `[]` | 群号列表，配合过滤模式使用 |
 
